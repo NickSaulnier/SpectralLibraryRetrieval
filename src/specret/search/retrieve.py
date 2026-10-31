@@ -21,8 +21,33 @@ RESULT_FIELDS = (
     "source",
     "instrument",
     "sample_id",
+    "purity_flag",
 )
 MIN_QUERY_BANDS = 20  # below this a partial-coverage query is not attempted
+
+
+def filter_library(
+    lib: SensorLibrary,
+    meta: pd.DataFrame,
+    chapters: tuple[str, ...] | None = None,
+    purity: tuple[str, ...] | None = None,
+) -> SensorLibrary:
+    """Restrict the searchable library.
+
+    `chapters`, e.g. ("M", "S", "C"), keeps minerals, mixtures and coatings. `purity`, e.g.
+    ("a", "b", "u"), keeps those USGS spectral purity grades; spectra without a grade (other
+    sources) are kept.
+    """
+    keep = np.ones(len(lib.spectrum_ids), dtype=bool)
+    rows = meta.loc[lib.spectrum_ids]
+    if chapters is not None:
+        keep &= rows["chapter"].isin(chapters).to_numpy()
+    if purity is not None and "purity_flag" in rows:
+        flag = rows["purity_flag"]
+        keep &= (flag.isna() | flag.isin(purity)).to_numpy()
+    if keep.all():
+        return lib
+    return SensorLibrary(lib.sensor, lib.spectrum_ids[keep], lib.matrix[keep])
 
 
 class Retriever:
@@ -33,13 +58,11 @@ class Retriever:
         vector: str = "sam",
         device: str | None = None,
         chapters: tuple[str, ...] | None = None,
+        purity: tuple[str, ...] | None = None,
     ):
-        """`chapters` restricts the searchable library, e.g. ("M", "S", "C") for minerals,
-        mixtures and coatings only."""
+        """`chapters` and `purity` restrict the searchable library (see filter_library)."""
         self.meta = canonical.set_index("spectrum_id")
-        if chapters is not None:
-            keep = self.meta.loc[lib.spectrum_ids, "chapter"].isin(chapters).to_numpy()
-            lib = SensorLibrary(lib.sensor, lib.spectrum_ids[keep], lib.matrix[keep])
+        lib = filter_library(lib, self.meta, chapters, purity)
         self.lib = lib
         self.vector = vector
         self.mask = vector_masks(lib)[vector]

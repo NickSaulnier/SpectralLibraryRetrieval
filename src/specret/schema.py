@@ -30,8 +30,9 @@ class SpectrumRecord:
     material_class: str | None = None
     chapter: str | None = None  # USGS chapter letter: M, S, C, L, O, A, V
     grain_size: str | None = None
-    purity_flag: str | None = None
+    purity_flag: str | None = None  # USGS spectral purity a/b/c/d/u for the VSWIR range
     purity_note: str | None = None
+    quality_flag: str | None = None  # our own checks, e.g. "implausible_scale"
     instrument: str | None = None
     measurement: str | None = None  # AREF, RREF, RTGC, ...
     extra: dict = field(default_factory=dict)

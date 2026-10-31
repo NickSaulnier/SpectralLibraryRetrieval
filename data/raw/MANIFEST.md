@@ -11,6 +11,12 @@ One entry per source: where it came from, version, when it was fetched, and its 
 - **Licence:** US Government public domain
 - **Location:** `data/raw/usgs_splib07/` (zips) and `data/raw/usgs_splib07/extracted/`
 
+### USGS splib07 HTML metadata (sample descriptions)
+- **Source:** ScienceBase item 586e8d4de4b0f5ce109fccbb, `HTMLmetadata.zip` (1.35 GB, mostly photos)
+- **Fetched:** 2026-10-31; only the .html/.htm/.pdf members were extracted (16 MB) and the zip was deleted
+- **Licence:** US Government public domain
+- **Location:** `data/raw/usgs_splib07_html/pages/`
+
 ## To fetch by hand
 
 ### ECOSTRESS spectral library

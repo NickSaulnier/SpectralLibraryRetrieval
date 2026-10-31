@@ -96,8 +96,12 @@ RECIPES = {
 
 
 def load_noise_curve(path: str | Path | None, n_bands: int, default: float = 0.005) -> np.ndarray:
+    """Per-band noise from a saved curve, or a flat `default` when there is none."""
     if path and Path(path).exists():
-        return np.load(path)
+        curve = np.load(path)
+        if curve.size != n_bands:
+            raise ValueError(f"{path}: {curve.size} bands, sensor has {n_bands}")
+        return curve
     return np.full(n_bands, default)
 
 

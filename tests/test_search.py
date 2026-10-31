@@ -106,3 +106,19 @@ def test_qdrant_ranking_matches_exact_search(toy_library):
 
     filtered = store.search("toy", "sam", qv[0], k=5, filters={"measurement": "AREF"})
     assert all(h["measurement"] == "AREF" for h in filtered)
+
+
+def test_filter_library_by_chapter_and_purity(toy_library):
+    from specret.search.retrieve import filter_library
+
+    lib, canonical = toy_library
+    grades = ("a", "b", "c", None)
+    canonical = canonical.assign(
+        purity_flag=[grades[(i // 2) % 4] for i in range(40)], chapter=["M", "V"] * 20
+    )
+    meta = canonical.set_index("spectrum_id")
+    out = filter_library(lib, meta, chapters=("M",), purity=("a", "b"))
+    kept = meta.loc[out.spectrum_ids]
+    assert set(kept["chapter"]) == {"M"}
+    assert set(kept["purity_flag"].dropna()) <= {"a", "b"}
+    assert kept["purity_flag"].isna().any()  # ungraded spectra are kept

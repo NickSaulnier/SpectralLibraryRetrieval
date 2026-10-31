@@ -122,6 +122,8 @@ Effort estimates assume part-time work. Phases 1–3 produce a usable tool. Phas
 
 ### Phase 2: Physics reranking and a benchmark (2–3 weeks)
 
+**Status (2026-10-31):** done. Results: `results/phase2a_continuum.md`, `results/phase2bc_hybrid.md`.
+
 **2a. Taxonomy and splits (do this before tuning anything, then freeze it)**
 - `configs/taxonomy.yaml`: hand-curate mineral → group → class for every splib07 and ECOSTRESS mineral name (kaolin group, alunite–jarosite, smectite, white mica, chlorite, carbonate, Fe-oxide/hydroxide, sulfate, silica, amphibole, ...). Expect a few hundred names. It's tedious, but the tool's group-level answers and its metrics both depend on it.
 - `eval/splits.py`: hold out test samples by `sample_id` and hold out whole mineral classes for open-set testing. Save the split with a hash and never regenerate it.

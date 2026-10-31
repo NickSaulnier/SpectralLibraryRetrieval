@@ -116,3 +116,38 @@ def test_resampler_matches_usgs_convolution(usgs_dirs):
     )
     assert len(report.per_spectrum) > 2000
     assert report.median_rel_error < 0.01
+
+
+def test_purity_grade_comes_from_instrument_code(fake_splib):
+    (r,) = load_splib07_dir(fake_splib)
+    assert r.purity_flag == "b"  # BECKb
+    assert r.quality_flag is None
+
+
+PAGE = """<HTML><BODY><H2>USGS Spectral Library Version 7 Sample Description</H2>
+TITLE: Bytownite HS106 Plagio DESCRIPT<p>
+SAMPLE_DESCRIPTION:<p>
+This sample shows a nice plagioclase feature near 1.2 &#181;m, but the 2.0-&#181;m band
+is due to water from a contaminant.<p>
+IMAGE_OF_SAMPLE:<p>
+END_SAMPLE_DESCRIPTION.<p>
+XRD_ANALYSIS:<p>Found: Calcic plagioclase<p>END_XRD_ANALYSIS.<p>
+MICROSCOPIC_EXAMINATION:<p>Not done yet<p>END_MICROSCOPIC_EXAMINATION.<p>
+<script>alert('ignored')</script>
+SPECTRAL_PURITY: 1c2c3c4c
+</BODY></HTML>"""
+
+
+def test_html_notes(tmp_path):
+    from specret.io.usgs_html import load_notes, parse_page
+
+    p = tmp_path / "Bytownite_HS106.3B_Plagio_BECKc_AREF.html"
+    p.write_text(PAGE, encoding="utf-8")
+    sections = parse_page(p)
+    assert "contaminant" in sections["description"]
+    assert "µm" in sections["description"]
+    assert "microscope" not in sections  # "Not done yet" is treated as empty
+    notes = load_notes(tmp_path)
+    note = notes["Bytownite_HS106.3B_Plagio_BECKc_AREF"]
+    assert note.startswith("This sample shows") and "XRD: Found: Calcic plagioclase" in note
+    assert "alert" not in note

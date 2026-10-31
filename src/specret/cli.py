@@ -32,9 +32,16 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     from specret.io.usgs_splib07 import load_splib07_dir
     from specret.schema import write_library
 
+    notes = None
+    html_dir = Path(args.usgs_html)
+    if html_dir.is_dir():
+        from specret.io.usgs_html import load_notes
+
+        notes = load_notes(html_dir)
+        print(f"{html_dir}: {len(notes)} sample notes")
     records = []
     for d in args.usgs or [str(USGS_EXTRACTED / "ASCIIdata_splib07a")]:
-        recs = load_splib07_dir(d)
+        recs = load_splib07_dir(d, notes=notes)
         print(f"{d}: {len(recs)} spectra")
         records.extend(recs)
     for d in args.ecostress or []:
@@ -45,7 +52,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
     unclassified = int((df["group"] == "unclassified").sum())
     if unclassified:
         print(f"warning: {unclassified} spectra match no group in configs/taxonomy.yaml")
-    flagged = df["purity_flag"].notna().sum()
+    flagged = df["quality_flag"].notna().sum()
     print(f"wrote {len(df)} spectra to {args.out} ({flagged} flagged by the scale check)")
 
 
@@ -134,11 +141,11 @@ def cmd_query(args: argparse.Namespace) -> None:
 def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     import numpy as np
 
+    from specret.eval.benchmark import build_method
     from specret.eval.emit_l2bmin import compare_group2, load_l2bmin, summarize
     from specret.io.download import CUPRITE_BBOX
     from specret.io.emit import open_emit_l2a
     from specret.schema import read_library
-    from specret.search.retrieve import Retriever
     from specret.sensors.library import SensorLibrary
 
     scene = open_emit_l2a(args.rfl)
@@ -148,12 +155,8 @@ def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     bbox = tuple(args.bbox) if args.bbox else CUPRITE_BBOX
     for vector in args.vectors:
         chapters = tuple(args.chapters) if args.chapters else None
-        if vector in ("rrf", "hybrid"):
-            from specret.search.hybrid import HybridRetriever
-
-            r = HybridRetriever(lib, canonical, chapters=chapters, rerank=vector == "hybrid")
-        else:
-            r = Retriever(lib, canonical, vector=vector, chapters=chapters)
+        purity = tuple(args.purity) if args.purity else None
+        r = build_method(vector, lib, canonical, chapters=chapters, purity=purity)
         r.check_bands(np.asarray(scene.centers_nm))
         df = compare_group2(scene, l2b, r, bbox, min_depth=args.min_depth, k=args.k)
         print(
@@ -213,7 +216,14 @@ def cmd_benchmark(args: argparse.Namespace) -> None:
     lib = SensorLibrary.load(args.library_npz)
     noise = load_noise_curve(args.noise, lib.sensor.n_bands)
     df = run_benchmark(
-        lib, read_library(args.library), load_splits(), args.recipes, args.methods, noise, k=args.k
+        lib,
+        read_library(args.library),
+        load_splits(),
+        args.recipes,
+        args.methods,
+        noise,
+        k=args.k,
+        purity=tuple(args.purity) if args.purity else None,
     )
     with pd.option_context("display.width", 200):
         for metric in ("group_top1", f"group_recall@{args.k}", "material_top1"):
@@ -247,6 +257,11 @@ def main(argv: list[str] | None = None) -> None:
     i = sub.add_parser("ingest", help="parse raw libraries into the canonical parquet")
     i.add_argument("--usgs", nargs="*", help="extracted ASCIIdata_<set> folders")
     i.add_argument("--ecostress", nargs="*", help="ECOSTRESS library folders")
+    i.add_argument(
+        "--usgs-html",
+        default="data/raw/usgs_splib07_html/pages",
+        help="extracted splib07 HTML pages, for sample notes (skipped if missing)",
+    )
     i.add_argument("--out", default=str(DEFAULT_CANONICAL))
     i.set_defaults(func=cmd_ingest)
 
@@ -311,9 +326,12 @@ def main(argv: list[str] | None = None) -> None:
         default=["clean", "photometric", "noise", "mix", "atm-mild", "atm-strong", "jitter", "all"],
     )
     b.add_argument(
-        "--methods", nargs="+", default=["sam", "swir2", "cr", "cr_swir2", "rrf", "hybrid"]
+        "--methods",
+        nargs="+",
+        default=["sam", "sid", "swir2", "cr", "cr_euclid", "cr_swir2", "rrf", "hybrid"],
     )
     b.add_argument("-k", type=int, default=5)
+    b.add_argument("--purity", nargs="+", help="keep USGS purity grades, e.g. a b u")
     b.add_argument("--csv")
     b.set_defaults(func=cmd_benchmark)
 
@@ -328,10 +346,12 @@ def main(argv: list[str] | None = None) -> None:
         "--vectors",
         nargs="+",
         default=["sam", "cr_swir2", "rrf", "hybrid"],
-        help="sam, swir2, cr, cr_swir2, rrf (fusion of sam/cr/cr_swir2) or hybrid (rrf + SFF)",
+        help="sam, sid, swir2, cr, cr_euclid, cr_swir2, rrf (fusion of sam/cr/cr_swir2) "
+        "or hybrid (rrf + SFF)",
     )
     c.add_argument("-k", type=int, default=5)
     c.add_argument("--chapters", nargs="+", help="restrict the library, e.g. M S C")
+    c.add_argument("--purity", nargs="+", help="keep USGS purity grades, e.g. a b u")
     c.add_argument("--out", help="folder for per-pixel results (parquet)")
     c.set_defaults(func=cmd_compare_l2bmin)
 

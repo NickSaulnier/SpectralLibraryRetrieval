@@ -29,6 +29,7 @@ class HybridRetriever:
         canonical: pd.DataFrame,
         vectors: tuple[str, ...] = DEFAULT_VECTORS,
         chapters: tuple[str, ...] | None = None,
+        purity: tuple[str, ...] | None = None,
         k_recall: int = 50,
         n_rerank: int = 20,
         rerank: bool = True,
@@ -38,7 +39,9 @@ class HybridRetriever:
         """`sff_weight` blends the rerank score with the fused rank score (both scaled to
         0-1 per query): 1.0 orders by feature fit alone, 0.0 keeps the fused order. The
         default 0.25 was chosen on the validation split (results/phase2bc_hybrid.md)."""
-        first = Retriever(lib, canonical, vectors[0], device=device, chapters=chapters)
+        first = Retriever(
+            lib, canonical, vectors[0], device=device, chapters=chapters, purity=purity
+        )
         self.lib = first.lib  # chapter-filtered
         self.meta = first.meta
         self.subs = [first] + [

@@ -29,10 +29,11 @@ PAYLOAD_FIELDS = (
     "instrument",
     "measurement",
     "purity_flag",
+    "quality_flag",
     "coverage_min_nm",
     "coverage_max_nm",
 )
-KEYWORD_INDEXES = ("source", "mineral", "group", "chapter", "measurement")
+KEYWORD_INDEXES = ("source", "mineral", "group", "chapter", "measurement", "purity_flag")
 
 
 def point_id(spectrum_id: str) -> str:

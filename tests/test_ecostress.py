@@ -45,7 +45,7 @@ def test_parse_ecostress_file(tmp_path):
     assert rec.sample_id == "ecostress:JHU:KGa-1"
     assert rec.mineral == "Kaolinite KGa-1 (well-ordered)"
     assert rec.material_class == "Silicate/Phyllosilicate"
-    assert rec.purity_flag is None
+    assert rec.quality_flag is None
 
 
 def test_missing_data_block_raises(tmp_path):

@@ -25,7 +25,7 @@ from specret.distort.simulator import (
 from specret.sensors.library import SensorLibrary
 
 BENCHMARK_SEED = 7_2026  # distinct from any training seed
-METHODS = ("sam", "swir2", "cr", "cr_swir2", "rrf", "hybrid")
+METHODS = ("sam", "sid", "swir2", "cr", "cr_euclid", "cr_swir2", "rrf", "hybrid")
 
 
 def _subset(lib: SensorLibrary, ids: set[str]) -> SensorLibrary:
@@ -101,14 +101,27 @@ def _metrics(matches: list[list[dict]], truth: pd.DataFrame, k: int) -> dict:
     }
 
 
-def build_method(name: str, ref: SensorLibrary, canonical: pd.DataFrame):
+def build_method(
+    name: str,
+    ref: SensorLibrary,
+    canonical: pd.DataFrame,
+    chapters: tuple[str, ...] | None = None,
+    purity: tuple[str, ...] | None = None,
+):
+    """Retriever for a method name: a vector, `rrf`, `hybrid`, `sid` or `cr_euclid`."""
+    if name in ("sid", "cr_euclid"):
+        from specret.search.baselines import BruteForceRetriever
+
+        return BruteForceRetriever(ref, canonical, metric=name, chapters=chapters, purity=purity)
     if name in ("rrf", "hybrid"):
         from specret.search.hybrid import HybridRetriever
 
-        return HybridRetriever(ref, canonical, rerank=name == "hybrid")
+        return HybridRetriever(
+            ref, canonical, chapters=chapters, purity=purity, rerank=name == "hybrid"
+        )
     from specret.search.retrieve import Retriever
 
-    return Retriever(ref, canonical, vector=name)
+    return Retriever(ref, canonical, vector=name, chapters=chapters, purity=purity)
 
 
 def run_benchmark(
@@ -119,6 +132,7 @@ def run_benchmark(
     methods: list[str],
     noise_sigma: np.ndarray,
     k: int = 5,
+    purity: tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
     rows = []
     retrievers: dict[str, object] = {}
@@ -126,7 +140,7 @@ def run_benchmark(
         queries, truth, ref = make_queries(lib, canonical, splits, recipe, noise_sigma)
         for method in methods:
             if method not in retrievers:
-                retrievers[method] = build_method(method, ref, canonical)
+                retrievers[method] = build_method(method, ref, canonical, purity=purity)
             matches = retrievers[method].query(queries, k=max(k, 10))
             rows.append(
                 {"recipe": recipe, "method": method, "n": len(truth), **_metrics(matches, truth, k)}

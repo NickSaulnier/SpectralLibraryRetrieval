@@ -69,8 +69,54 @@ uv run specret compare-l2bmin data/resampled/emit/library.npz --rfl <...> --min 
   --chapters M S C --vectors sam cr_swir2 rrf hybrid
 ```
 
-## Still open in Phase 2
+## Distance baselines (added to complete Phase 2)
 
-- Baselines not yet in the harness: SID and Euclidean distance on continuum-removed spectra.
-- Ingesting splib07 purity notes (needs the HTML metadata release).
-- The same benchmark on AVIRIS-Classic bands.
+Two classical non-cosine baselines, run by brute force (`search/baselines.py`):
+- `sid`: Spectral Information Divergence on raw reflectance;
+- `cr_euclid`: Euclidean distance between continuum-removed spectra, without depth normalisation.
+
+| | `sam` | `sid` | `cr_euclid` | `cr` | **`hybrid`** |
+|---|---:|---:|---:|---:|---:|
+| EMIT Cuprite, group agreement | 19.1% | 15.9% | 37.0% | 36.7% | **55.2%** |
+| EMIT Cuprite, class agreement | 28.3% | 25.0% | 54.9% | 42.3% | **66.8%** |
+| EMIT bands, synthetic `clean`, group top-1 | 0.618 | 0.603 | 0.702 | 0.763 | 0.740 |
+| EMIT bands, synthetic `all`, group top-1 | 0.389 | 0.382 | 0.481 | 0.542 | **0.580** |
+
+- **SID behaves like SAM.** Both compare overall shape on raw reflectance and fail the same way.
+- **`cr_euclid` is strong on silica (95% vs 87% for `hybrid`) and calcite at class level**, but weak on alunite (22%). Without depth normalisation, a deep feature of the wrong mineral can beat a shallow feature of the right one.
+
+## AVIRIS-Classic bands (224 bands, 2014 calibration)
+
+Same frozen test split (n = 131). There is no per-pixel uncertainty for AVIRIS, so noise is a flat 0.005 reflectance (`--noise none`). Group top-1:
+
+| Recipe | `sam` | `sid` | `cr` | `cr_euclid` | `rrf` | **`hybrid`** |
+|---|---:|---:|---:|---:|---:|---:|
+| clean | 0.618 | 0.618 | 0.733 | 0.664 | 0.771 | **0.779** |
+| noise | 0.626 | 0.634 | 0.595 | 0.603 | 0.649 | **0.672** |
+| mix | 0.412 | 0.435 | 0.573 | 0.519 | **0.626** | **0.626** |
+| atm-strong | 0.611 | 0.603 | 0.687 | 0.649 | 0.771 | **0.794** |
+| jitter | 0.618 | 0.611 | 0.748 | 0.679 | **0.779** | **0.779** |
+| all | 0.412 | 0.427 | 0.458 | 0.412 | **0.542** | 0.534 |
+
+The ranking of methods matches EMIT. On the coarser AVIRIS bands, fusion matters more than any single vector: `cr` alone drops 8 points on `all` compared with EMIT, while `rrf` and `hybrid` drop about 3–5.
+
+```bash
+uv run specret benchmark data/resampled/avirisc/library.npz --noise none
+```
+
+## splib07 purity grades and sample notes
+
+- **Purity grades come from the spectrum titles.** The letter after the instrument code (`BECKb`, `ASDFRc`) is the USGS spectral purity grade: a = pure, b = appears pure, c = weak contaminant features, d = significant contamination, u = not evaluated. The ingest parser had wrongly treated these letters as spectrometer settings. They are now stored in `purity_flag`: 1,186 a, 883 b, 373 c, 10 d, 4 u.
+- **Sample notes come from the HTML metadata release.** That's the sample description, spectroscopy remarks, microscope and X-ray diffraction findings, stored in `purity_note` for 2,423 of 2,456 spectra. They are fetched from `HTMLmetadata.zip` (1.35 GB, text pages kept, photos discarded) and ingested automatically when `data/raw/usgs_splib07_html/pages` exists.
+- **The bytownite case is explained.** The c-graded `Bytownite HS106.3B` note says its 2.0 µm band and bands beyond ~2.3 µm "are due to water from a contaminant". That's where calcite's diagnostic feature sits.
+- **Excluding c and d samples does not help on Cuprite.**
+
+| Hybrid, EMIT Cuprite | All grades | a, b, u only |
+|---|---:|---:|
+| Group top-1 | **55.2%** | 48.6% |
+| Group top-5 | 78.9% | **84.3%** |
+| Class top-1 | **66.8%** | 59.4% |
+| White mica top-1 | **96.5%** | 72.1% |
+| Kaolin top-1 | 10.8% | **15.2%** |
+
+Many good reference spectra are c-graded (several muscovites, for example), and real rocks are impure too. So purity is exposed as a filter (`--purity a b u`) and returned with every match, but all grades stay in the default library.

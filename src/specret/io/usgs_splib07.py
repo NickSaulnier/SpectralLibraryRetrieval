@@ -9,8 +9,11 @@ Layout of an extracted ASCIIdata_<set> folder:
 Every data file has one header line, e.g.
     " splib07a Record=5976: Kaolinite CM9                 BECKb AREF"
 followed by one value per line. Deleted channels are stored as -1.23e34.
-The letters after the instrument code (usually lowercase) describe spectrometer settings,
-not purity.
+The letters after the instrument code are the USGS spectral purity grades (Kokaly et al.,
+2017): a = pure, b = appears pure but other analyses show contaminants without significant
+features, c = weak contaminant features, d = significant contamination, u = not evaluated.
+Nicolet (NIC4) spectra carry one to three letters for 1.12-6, 6-25 and 25-150 um; the first
+is the one that matters in the VSWIR.
 """
 
 from __future__ import annotations
@@ -97,11 +100,13 @@ def load_splib07_dir(
     root: str | Path,
     measurements: tuple[str, ...] = DEFAULT_MEASUREMENTS,
     max_wavelength_nm: float | None = 3000.0,
+    notes: dict[str, str] | None = None,
 ) -> list[SpectrumRecord]:
     """Parse one extracted ASCIIdata_<set> folder into canonical records.
 
     Spectra are trimmed to `max_wavelength_nm` (VSWIR scope) and dropped if nothing valid is
-    left. Records failing the reflectance scale check are kept but flagged in `purity_flag`.
+    left. Records failing the reflectance scale check are kept but flagged in `quality_flag`.
+    `notes` maps source_record to a sample note (io/usgs_html.load_notes).
     """
     root = Path(root)
     bands = _BandFiles(root)
@@ -147,7 +152,11 @@ def load_splib07_dir(
                     wavelength_nm=wl,
                     reflectance=values,
                     native_fwhm_nm=fwhm,
-                    purity_flag=None if is_plausible(values) else "implausible_scale",
+                    purity_flag=(header["settings"][:1].lower() or None),
+                    purity_note=None
+                    if notes is None
+                    else notes.get(path.stem.removeprefix(f"{prefix}_")),
+                    quality_flag=None if is_plausible(values) else "implausible_scale",
                 )
             )
     return records

@@ -120,3 +120,33 @@ def test_distortions_are_seeded_and_bounded():
     p = photometric(CALCITE, WL, np.random.default_rng(0), scale=(2.0, 2.0), tilt=0.0)
     np.testing.assert_allclose(p, 2 * CALCITE)
     assert {"clean", "all", "mix"} <= set(RECIPES)
+
+
+# --- distance baselines ---
+
+
+def test_sid_is_zero_for_scaled_copies_and_positive_otherwise():
+    from specret.search.baselines import sid_matrix
+
+    d = sid_matrix(np.vstack([CALCITE]), np.vstack([2 * CALCITE, MUSCOVITE]))
+    assert d[0, 0] == pytest.approx(0.0, abs=1e-12)
+    assert d[0, 1] > 0
+
+
+def test_brute_force_retrievers_find_the_right_material():
+    from specret.search.baselines import BruteForceRetriever
+
+    lib_m = np.vstack([KAOLINITE, MUSCOVITE, CALCITE, DOLOMITE])
+    ids = np.array(["k", "m", "c", "d"])
+    canonical = pd.DataFrame(
+        {
+            "spectrum_id": ids,
+            "material_name": ["Kaolinite", "Muscovite", "Calcite", "Dolomite"],
+            "group": ["kaolin", "white_mica", "calcite", "dolomite"],
+            "chapter": "M",
+        }
+    )
+    lib = SensorLibrary(SENSOR, ids, lib_m)
+    for metric in ("sid", "cr_euclid"):
+        r = BruteForceRetriever(lib, canonical, metric=metric)
+        assert r.query(DOLOMITE * 1.0001, k=2)[0][0]["spectrum_id"] == "d"

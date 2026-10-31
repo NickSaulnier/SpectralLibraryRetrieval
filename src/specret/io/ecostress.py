@@ -98,7 +98,7 @@ def load_ecostress_dir(root: str | Path, max_wavelength_nm: float | None = 3000.
                 measurement="AREF",
                 wavelength_nm=wl,
                 reflectance=refl,
-                purity_flag=None if is_plausible(refl) else "implausible_scale",
+                quality_flag=None if is_plausible(refl) else "implausible_scale",
             )
         )
     return records
