@@ -8,18 +8,28 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
 from specret.preprocess.normalize import sam_degrees
 from specret.rerank.features import load_features
-from specret.rerank.sff import compute_features, explain, score_candidates
+from specret.rerank.sff import SFFResult, compute_features, explain, score_candidates
 from specret.search.fusion import rrf
 from specret.search.retrieve import RESULT_FIELDS, Retriever
 from specret.search.vectors import represent
 from specret.sensors.library import SensorLibrary
 
 DEFAULT_VECTORS = ("sam", "cr", "cr_swir2")
+
+
+@dataclass
+class RankResult:
+    rows: np.ndarray  # (nq, n_rerank) library rows, best first; -1 = none
+    fused: np.ndarray  # reciprocal-rank-fusion score
+    combined: np.ndarray  # final ranking score in [0, 1]; -inf for padding
+    sff: SFFResult | None  # feature-fit details, None when rerank is off
 
 
 class HybridRetriever:
@@ -57,18 +67,18 @@ class HybridRetriever:
     def check_bands(self, centers_nm: np.ndarray) -> None:
         self.subs[0].check_bands(centers_nm)
 
-    def rank(self, spectra: np.ndarray):
-        """Candidate rows (nq, n_rerank) in final order, plus fused and SFF scores."""
+    def rank(self, spectra: np.ndarray) -> RankResult:
+        """Candidate rows (nq, n_rerank) in final order with their scores."""
         spectra = np.atleast_2d(spectra)
         lists = [sub.search_rows(spectra, self.k_recall)[1] for sub in self.subs]
         rows, fused = rrf(lists, self.n_rerank)
+        top = fused.max(axis=1, keepdims=True)
+        fused_norm = np.divide(fused, top, out=np.zeros_like(fused), where=top > 0)
         if not self.rerank:
-            return rows, fused, None
+            return RankResult(rows, fused, np.where(rows >= 0, fused_norm, -np.inf), None)
         qf = compute_features(spectra, self.lib.sensor, self.features)
         res = score_candidates(qf, self.lib_features, rows, self.features)
         # Blend feature fit with the fused score, then break ties on the fused score.
-        top = fused.max(axis=1, keepdims=True)
-        fused_norm = np.divide(fused, top, out=np.zeros_like(fused), where=top > 0)
         sff = np.where(np.isfinite(res.score), res.score, 0.0)
         combined = self.sff_weight * sff + (1.0 - self.sff_weight) * fused_norm
         combined[rows < 0] = -np.inf
@@ -81,7 +91,7 @@ class HybridRetriever:
         for d in res.per_window.values():
             for key in d:
                 d[key] = take(np.asarray(d[key]))
-        return take(rows), take(fused), res
+        return RankResult(take(rows), take(fused), take(combined), res)
 
     def query(
         self, spectra: np.ndarray, k: int = 5, batch: int = 4096, with_explain: bool = False
@@ -91,7 +101,8 @@ class HybridRetriever:
         good = self.lib.sensor.good_mask
         for start in range(0, len(spectra), batch):
             chunk = spectra[start : start + batch]
-            rows, fused, res = self.rank(chunk)
+            ranked = self.rank(chunk)
+            rows, fused, res = ranked.rows, ranked.fused, ranked.sff
             qsam, _ = represent(chunk, self.lib.sensor.centers_nm, good, "sam")
             for qi in range(len(chunk)):
                 matches = []
@@ -104,6 +115,7 @@ class HybridRetriever:
                     cos = float(self._sam_lib[r] @ qsam[qi])
                     item = {
                         "spectrum_id": sid,
+                        "score": float(ranked.combined[qi, ci]),
                         "fused": float(fused[qi, ci]),
                         "sff": None if res is None else float(res.score[qi, ci]),
                         "cosine": cos,

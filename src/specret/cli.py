@@ -239,6 +239,43 @@ def cmd_benchmark(args: argparse.Namespace) -> None:
         df.to_csv(args.csv, index=False)
 
 
+def cmd_map_scene(args: argparse.Namespace) -> None:
+    from specret.scene.mapper import group_fractions, map_scene
+    from specret.scene.outputs import write_scene_maps
+    from specret.schema import read_library
+    from specret.search.hybrid import HybridRetriever
+    from specret.sensors.library import SensorLibrary
+
+    scene = _open_scene(args.scene)
+    canonical = read_library(args.library)
+    chapters = tuple(args.chapters) if args.chapters else None
+    r = HybridRetriever(
+        SensorLibrary.load(args.library_npz),
+        canonical,
+        chapters=chapters,
+        sff_weight=args.sff_weight,
+    )
+    smap = map_scene(scene, r, canonical, k=args.k)
+    out = Path(args.out or f"outputs/maps/{Path(args.scene).stem}")
+    smap.save(out / "scene_map.npz")
+    paths = write_scene_maps(smap, scene, canonical, out)
+    n = int(smap.valid.sum())
+    print(f"mapped {n:,} pixels in {smap.seconds:.0f} s -> {out}")
+    print(", ".join(p.name for p in paths.values()))
+    print(group_fractions(smap).head(12).round(3).to_string())
+
+
+def _open_scene(path: str):
+    """EMIT L2A granule (.nc) or AVIRIS ENVI header (.hdr)."""
+    if path.endswith(".nc"):
+        from specret.io.emit import open_emit_l2a
+
+        return open_emit_l2a(path)
+    from specret.io.aviris import open_aviris
+
+    return open_aviris(path)
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="specret", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -334,6 +371,31 @@ def main(argv: list[str] | None = None) -> None:
     b.add_argument("--purity", nargs="+", help="keep USGS purity grades, e.g. a b u")
     b.add_argument("--csv")
     b.set_defaults(func=cmd_benchmark)
+
+    vw = sub.add_parser("view", help="local web viewer for scene maps and field spectra")
+    vw.add_argument("--host", default="127.0.0.1")
+    vw.add_argument("--port", type=int, default=8765)
+    vw.set_defaults(
+        func=lambda a: __import__("specret.viewer.app").viewer.app.serve(a.host, a.port)
+    )
+
+    mc = sub.add_parser("mcp", help="run the FastMCP tool server (stdio)")
+    mc.set_defaults(func=lambda _args: __import__("specret.mcp_server").mcp_server.main())
+
+    ms = sub.add_parser("map-scene", help="map every pixel of a scene with the hybrid retriever")
+    ms.add_argument("library_npz", help="library resampled to this scene's bands")
+    ms.add_argument("--scene", required=True, help="EMIT L2A RFL .nc or AVIRIS .hdr")
+    ms.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    ms.add_argument(
+        "--chapters",
+        nargs="+",
+        default=["M", "S", "C", "V"],
+        help="library chapters to search (default: minerals, mixtures, coatings, vegetation)",
+    )
+    ms.add_argument("--sff-weight", type=float, default=0.25)
+    ms.add_argument("-k", type=int, default=5)
+    ms.add_argument("--out", help="output folder (default outputs/maps/<scene>)")
+    ms.set_defaults(func=cmd_map_scene)
 
     c = sub.add_parser("compare-l2bmin", help="agreement with the EMIT L2B mineral map")
     c.add_argument("library_npz", help="library resampled to this scene's EMIT bands")

@@ -150,6 +150,8 @@ Effort estimates assume part-time work. Phases 1–3 produce a usable tool. Phas
 
 ### Phase 3: Scene mapping, viewer and MCP tools (2–3 weeks)
 
+**Status (2026-10-31):** done for EMIT (`results/phase3_mapping.md`). No clustering was needed: the full hybrid pipeline maps an EMIT scene in ~2 min. AVIRIS mapping waits on an AVIRIS scene.
+
 - `scene/mapper.py`: run exact GPU search on **every** pixel, since it's cheap (Decision 1). Run the SFF rerank only on cluster centroids (k-means or SLIC superpixels in a combined spectral and spatial space) and on low-confidence or boundary pixels.
 - The same mapper works on EMIT and AVIRIS scenes through the sensor configs.
 - Outputs as cloud-optimized GeoTIFF:

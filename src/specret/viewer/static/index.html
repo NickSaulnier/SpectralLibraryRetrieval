@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spectral Match Viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1f22; --muted: #646a73; --line: #e2e0db;
+    --accent: #2f6fb3; --query: #1d1f22; --m1: #c4512b; --m2: #2f6fb3; --m3: #3f8f5a;
+    --window: rgba(47, 111, 179, 0.08); --good: #3f8f5a; --mid: #b98a1f; --bad: #b5452f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141618; --panel: #1c1f22; --ink: #e8e6e1; --muted: #9aa0a8; --line: #2c3035;
+      --accent: #6aa5e6; --query: #e8e6e1; --m1: #e87a52; --m2: #6aa5e6; --m3: #6cc28a;
+      --window: rgba(106, 165, 230, 0.10); --good: #6cc28a; --mid: #d9b04a; --bad: #e07a63;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header select { font: inherit; padding: 4px 8px; border: 1px solid var(--line);
+                  border-radius: 6px; background: var(--bg); color: var(--ink); max-width: 100%; }
+  .hint { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr);
+         gap: 16px; padding: 16px 20px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 14px; min-width: 0; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+              color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  #mapwrap { position: relative; overflow: auto; max-height: 70vh; border-radius: 6px;
+             background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0/16px 16px; }
+  #map { display: block; width: 100%; height: auto; cursor: crosshair; image-rendering: pixelated; }
+  #marker { position: absolute; width: 14px; height: 14px; border: 2px solid #fff;
+            box-shadow: 0 0 0 2px #000; border-radius: 50%; transform: translate(-50%, -50%);
+            pointer-events: none; display: none; }
+  #legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; }
+  #legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  #legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  #plot { width: 100%; height: 340px; }
+  .verdict { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+  .verdict b { font-size: 18px; }
+  .pill { font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; }
+  .high { color: var(--good); } .medium { color: var(--mid); } .low { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .ev { color: var(--muted); font-size: 12px; }
+  #drop { margin-top: 14px; border: 1.5px dashed var(--line); border-radius: 8px; padding: 14px;
+          text-align: center; color: var(--muted); }
+  #drop.over { border-color: var(--accent); color: var(--accent); }
+  #status { color: var(--muted); font-size: 13px; min-height: 1.4em; }
+  .swatch { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spectral Match Viewer</h1>
+  <select id="scene" aria-label="Scene"></select>
+  <span class="hint">Click a pixel on the map, or drop a field spectrum below.</span>
+</header>
+<main>
+  <section class="panel">
+    <h2>Best-match mineral group</h2>
+    <div id="mapwrap"><img id="map" alt="Mineral group map"><div id="marker"></div></div>
+    <div id="legend"></div>
+    <div id="drop">Drop an .asd or .csv field spectrum here, or <label style="text-decoration:underline;cursor:pointer">choose a file<input id="file" type="file" accept=".asd,.csv,.txt,.tsv" hidden></label></div>
+  </section>
+  <section class="panel">
+    <h2>Spectrum and matches</h2>
+    <div id="status">No pixel selected.</div>
+    <div id="verdict"></div>
+    <div id="plot"></div>
+    <table id="matches"></table>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let scene = null;
+
+async function loadScenes() {
+  const scenes = (await (await fetch('/api/scenes')).json()).filter(s => s.mapped);
+  if (!scenes.length) { $('status').textContent = 'No mapped scenes. Run `specret map-scene` first.'; return; }
+  $('scene').innerHTML = scenes.map(s => `<option>${s.scene_id}</option>`).join('');
+  $('scene').onchange = () => showScene($('scene').value);
+  showScene(scenes[0].scene_id);
+}
+
+async function showScene(id) {
+  scene = id;
+  $('marker').style.display = 'none';
+  $('map').src = `/api/map/${id}.png`;
+  const legend = await (await fetch(`/api/legend/${id}`)).json();
+  $('legend').innerHTML = legend.filter(l => l.fraction >= 0.002).map(l =>
+    `<span><i style="background:rgb(${l.rgb})"></i>${l.group.replaceAll('_', ' ')} ${(100 * l.fraction).toFixed(1)}%</span>`).join('');
+}
+
+$('map').addEventListener('click', async (ev) => {
+  const img = $('map'), r = img.getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) * img.naturalWidth / r.width);
+  const y = Math.floor((ev.clientY - r.top) * img.naturalHeight / r.height);
+  const m = $('marker');
+  m.style.left = `${ev.clientX - r.left + $('mapwrap').scrollLeft}px`;
+  m.style.top = `${ev.clientY - r.top + $('mapwrap').scrollTop}px`;
+  m.style.display = 'block';
+  $('status').textContent = 'Identifying…';
+  const res = await fetch(`/api/pixel/${scene}?x=${x}&y=${y}`);
+  if (!res.ok) { $('status').textContent = (await res.json()).detail; return; }
+  const d = await res.json();
+  $('status').textContent = `Pixel row ${d.pixel.row}, col ${d.pixel.col} · ${d.pixel.lat.toFixed(4)}°, ${d.pixel.lon.toFixed(4)}°`;
+  render(d);
+});
+
+function render(d) {
+  const s = d.summary;
+  $('verdict').innerHTML = s.best_material
+    ? `<div class="verdict"><b>${s.best_material}</b><span>${(s.best_group || '').replaceAll('_', ' ')}</span>
+       <span class="pill ${s.confidence}">${s.confidence} confidence</span>
+       <span class="hint">score ${s.score.toFixed(2)}</span></div>`
+    : `<div class="verdict"><b>No match</b><span class="hint">${s.reason}</span></div>`;
+  const wl = d.wavelengths_nm, norm = (a) => { const m = Math.max(...a.filter(Number.isFinite)); return a.map(v => v / m); };
+  const colors = [css('--m1'), css('--m2'), css('--m3')];
+  const traces = [{ x: wl, y: norm(d.query), name: 'query', mode: 'lines', line: { color: css('--query'), width: 2.5 } }];
+  d.matches.slice(0, 3).forEach((m, i) => traces.push({ x: wl, y: norm(m.spectrum), name: m.material_name,
+    mode: 'lines', line: { color: colors[i], width: 1.5 } }));
+  const shapes = Object.entries(d.windows).map(([name, [lo, hi]]) => ({ type: 'rect', xref: 'x', yref: 'paper',
+    x0: lo, x1: hi, y0: 0, y1: 1, fillcolor: css('--window'), line: { width: 0 } }));
+  // Windows in 2.0-2.5 um overlap, so stagger their labels vertically.
+  const annotations = Object.entries(d.windows).map(([name, [lo, hi]], i) => ({ x: (lo + hi) / 2, y: 1, yref: 'paper',
+    yshift: (i % 3) * 12, text: name.replaceAll('_', '-'), showarrow: false,
+    font: { size: 10, color: css('--muted') }, yanchor: 'bottom' }));
+  Plotly.newPlot('plot', traces, {
+    margin: { l: 44, r: 10, t: 48, b: 40 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: css('--ink'), size: 12 }, shapes, annotations,
+    xaxis: { title: 'Wavelength (nm)', gridcolor: css('--line'), zeroline: false },
+    yaxis: { title: 'Scaled reflectance', gridcolor: css('--line'), zeroline: false },
+    legend: { orientation: 'h', y: -0.25 },
+  }, { displayModeBar: false, responsive: true });
+  const ev = (f) => `${f.window.replaceAll('_', '-')}: ${f.query_center_nm.toFixed(0)}→${f.cand_center_nm.toFixed(0)} nm, r ${f.shape_r.toFixed(2)}`;
+  $('matches').innerHTML = `<tr><th>#</th><th>Material</th><th>Group</th><th class="num">Score</th><th>Purity</th></tr>` +
+    d.matches.map((m, i) => `<tr><td>${i < 3 ? `<span class="swatch" style="background:${colors[i]}"></span>` : ''}${i + 1}</td>
+      <td>${m.material_name}<div class="ev">${(m.features || []).slice(0, 2).map(ev).join(' · ')}</div></td>
+      <td>${(m.group || '').replaceAll('_', ' ')}</td><td class="num">${m.score.toFixed(2)}</td><td>${m.purity_flag ?? '–'}</td></tr>`).join('');
+}
+
+async function uploadFile(file) {
+  $('status').textContent = `Identifying ${file.name}…`;
+  const body = new FormData(); body.append('file', file);
+  const res = await fetch('/api/field', { method: 'POST', body });
+  if (!res.ok) { $('status').textContent = (await res.json()).detail; return; }
+  const results = await res.json();
+  $('status').textContent = `Field spectrum: ${results[0].name}${results.length > 1 ? ` (+${results.length - 1} more in file)` : ''}`;
+  render(results[0]);
+}
+const drop = $('drop');
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+$('file').addEventListener('change', (e) => e.target.files[0] && uploadFile(e.target.files[0]));
+loadScenes();
+</script>
+</body>
+</html>

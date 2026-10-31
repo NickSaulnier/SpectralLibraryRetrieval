@@ -7,17 +7,23 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "earthaccess>=0.11",
+    "fastapi>=0.115",
+    "fastmcp>=2.10",
     "matplotlib>=3.8",
     "netcdf4>=1.7",
+    "numba>=0.60",
     "numpy>=1.26",
     "pandas>=2.2",
     "pyarrow>=16",
+    "python-multipart>=0.0.9",
     "pyyaml>=6",
     "qdrant-client>=1.20",
+    "rasterio>=1.4",
     "requests>=2.31",
     "scipy>=1.13",
     "spectral>=0.23",
     "tqdm>=4.66",
+    "uvicorn>=0.30",
     "xarray>=2024.6",
 ]
 

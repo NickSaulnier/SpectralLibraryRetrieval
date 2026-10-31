@@ -2,9 +2,9 @@
 
 Identify materials from a measured spectrum (an EMIT or AVIRIS pixel, or a field spectrometer
 reading) by matching it against reference spectral libraries. The phased plan is in
-[PLAN.md](PLAN.md). This repository covers Phases 0–1 (ingestion, sensor resampling, SAM retrieval) and
-most of Phase 2 (taxonomy, frozen splits, continuum removal, rank fusion, feature-fit
-reranking, synthetic benchmark). Results are in `results/`.
+[PLAN.md](PLAN.md). This repository covers Phases 0–3: ingestion and sensor resampling, physics-based
+retrieval (continuum removal, rank fusion, feature-fit reranking) with a frozen benchmark,
+scene-scale mapping, a local viewer and MCP tools. Results are in `results/`.
 
 ## Setup
 
@@ -53,6 +53,24 @@ and `cr_swir2` and reranks the candidates by fitting diagnostic absorption featu
 
 Sensor definitions are in `configs/sensors/`. EMIT and AVIRIS-NG read their band centres from
 the scene file, so the library is resampled once per sensor configuration.
+
+## Maps, viewer and agent tools (Phase 3)
+
+```bash
+uv run specret map-scene data/resampled/emit/library.npz --scene <EMIT_L2A_RFL .nc>   # ~2 min per EMIT scene
+uv run specret view                                  # http://127.0.0.1:8765
+uv run specret mcp                                   # FastMCP server over stdio
+```
+
+To use the tools from Claude Code:
+
+```bash
+claude mcp add specret -- uv run --directory D:/Projects/HyperspectralIndexing specret mcp
+```
+
+Tools: `list_resources`, `identify_spectrum`, `identify_pixel`, `explain_match`,
+`identify_field_spectrum`, `library_entry`, `map_scene`, `job_status`, `scene_summary`.
+See `results/phase3_mapping.md`.
 
 ## Layout
 
