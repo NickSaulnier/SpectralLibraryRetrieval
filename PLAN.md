@@ -200,6 +200,8 @@ This phase is what makes the tool trustworthy on real pixels.
 
 ### Phase 5 (optional upgrade): learned sensor-agnostic encoder
 
+**Status (2026-10-31):** built and evaluated, **not adopted** under the ship rule. It is best on the synthetic benchmark (0.63 vs 0.58 all-distortions group top-1) and transfers across sensors with no loss, but agrees with EMIT L2B MIN on only 14% of Cuprite pixels, against 55% for the hybrid. Next step if pursued: self-supervised pretraining on real EMIT pixels from other scenes. See `results/phase5_learned.md`.
+
 Pursue this only if Phases 2–4 leave a clear gap, typically on heavily mixed or atmosphere-affected pixels, or on sensors without per-sensor tuning.
 
 - **Model:** one token per valid band, `(λ, ρ, fwhm)`, with sinusoidal wavelength encoding, feeding a small transformer (about 1–5M parameters). One model then serves EMIT, both AVIRIS sensors and field instruments.

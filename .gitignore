@@ -22,3 +22,6 @@ outputs/
 
 # Earthdata/OPeNDAP client config written by earthaccess (machine-specific)
 .dodsrc
+
+# Trained model weights (rebuild with `specret train-encoder`)
+models/

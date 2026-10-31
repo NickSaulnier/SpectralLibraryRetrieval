@@ -108,7 +108,23 @@ def build_method(
     chapters: tuple[str, ...] | None = None,
     purity: tuple[str, ...] | None = None,
 ):
-    """Retriever for a method name: a vector, `rrf`, `hybrid`, `sid` or `cr_euclid`."""
+    """Retriever for a method name: a vector, `rrf`, `hybrid`, `sid`, `cr_euclid`,
+    `learned`, `rrf+learned` or `hybrid+learned`."""
+    if name == "learned":
+        from specret.search.learned import LearnedRetriever
+
+        return LearnedRetriever(ref, canonical, chapters=chapters, purity=purity)
+    if name in ("rrf+learned", "hybrid+learned"):
+        from specret.search.hybrid import DEFAULT_VECTORS, HybridRetriever
+
+        return HybridRetriever(
+            ref,
+            canonical,
+            vectors=(*DEFAULT_VECTORS, "learned"),
+            chapters=chapters,
+            purity=purity,
+            rerank=name.startswith("hybrid"),
+        )
     if name in ("sid", "cr_euclid"):
         from specret.search.baselines import BruteForceRetriever
 

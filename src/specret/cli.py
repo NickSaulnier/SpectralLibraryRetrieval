@@ -337,6 +337,30 @@ def cmd_eval_unmix(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_train_encoder(args: argparse.Namespace) -> None:
+    import json
+
+    import numpy as np
+
+    from specret.eval.splits import load_splits
+    from specret.learn.train import TrainConfig, train
+    from specret.schema import read_library
+    from specret.sensors.library import SensorLibrary
+
+    libs = {n: SensorLibrary.load(f"data/resampled/{n}/library.npz") for n in args.sensors}
+    noise = {}
+    for n in args.sensors:
+        path = Path(f"data/derived/{n}_noise.npy")
+        if path.exists():
+            noise[n] = np.load(path)
+    cfg = TrainConfig(sensors=tuple(args.sensors), steps=args.steps, batch=args.batch)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    log = train(libs, read_library(args.library), load_splits(), cfg, out, noise)
+    out.with_suffix(".json").write_text(json.dumps(log, indent=2), encoding="utf-8")
+    print(f"best val mean {log['best_val_mean']:.3f} -> {out}")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="specret", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -458,6 +482,14 @@ def main(argv: list[str] | None = None) -> None:
     eu.add_argument("--split", default="test", choices=["val", "test"])
     eu.add_argument("-n", type=int, default=300)
     eu.set_defaults(func=cmd_eval_unmix)
+
+    te = sub.add_parser("train-encoder", help="train the learned spectral encoder (Phase 5)")
+    te.add_argument("--sensors", nargs="+", default=["emit", "avirisc"])
+    te.add_argument("--steps", type=int, default=3000)
+    te.add_argument("--batch", type=int, default=256)
+    te.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    te.add_argument("--out", default="models/encoder_v1.pt")
+    te.set_defaults(func=cmd_train_encoder)
 
     ms = sub.add_parser("map-scene", help="map every pixel of a scene with the hybrid retriever")
     ms.add_argument("library_npz", help="library resampled to this scene's bands")

@@ -80,6 +80,16 @@ uv run specret calibrate data/resampled/emit/library.npz      # -> configs/calib
 uv run specret eval-unmix data/resampled/emit/library.npz     # synthetic mixture benchmark
 ```
 
+## Learned encoder (Phase 5, experimental)
+
+```bash
+uv run specret train-encoder --steps 4000      # ~5 min on a GPU -> models/encoder_v1.pt
+uv run specret benchmark data/resampled/emit/library.npz --methods hybrid learned hybrid+learned
+```
+
+The encoder wins on the synthetic benchmark but not on the real EMIT scene, so it isn't part
+of the default retriever. See `results/phase5_learned.md`.
+
 ## Layout
 
 ```
