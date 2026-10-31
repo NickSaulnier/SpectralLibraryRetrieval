@@ -293,11 +293,11 @@ This is manual work and easy to underestimate, so budget time for it in Phase 2a
 ## 7. First-week checklist
 
 - [x] `git init`, uv project skeleton, ruff, pytest, `docker-compose.yml` for Qdrant
-- [ ] Start the Qdrant server (`docker compose up -d`) and run `specret index` against it
-- [ ] Create the Earthdata account and test the `earthaccess` login
+- [x] Start the Qdrant server (`docker compose up -d`) and run `specret index` against it
+- [x] Create the Earthdata account and test the `earthaccess` login
 - [x] Download splib07a and the AVIRIS-2014-convolved set
 - [ ] Download the ECOSTRESS VSWIR files (request form, by hand)
-- [ ] Find the EMIT L2A and L2B mineral granules over Cuprite and download one clear scene
+- [x] Find the EMIT L2A and L2B mineral granules over Cuprite and download one clear scene (2024-07-27); first comparison in `results/phase1_emit_cuprite.md`
 - [ ] Find AVIRIS-Classic and AVIRIS-NG Cuprite reflectance, and start searching for the USGS Tetracorder maps
 - [ ] Download a public ASD field dataset into `data/field/raw/` and fill in `metadata.csv`
 - [x] Write the splib07 parser, `library.parquet`, and the resampler with its validation test (median relative error 0.004% against USGS's AVIRIS-2014 convolution)

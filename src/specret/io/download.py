@@ -79,6 +79,7 @@ def download_emit(
 
     from specret.io.emit import search_emit
 
+    earthaccess.login()  # ~/.netrc, EARTHDATA_USERNAME/PASSWORD, or an interactive prompt
     results = search_emit(bbox, temporal, short_names=products)
     if limit is not None:
         results = results[:limit]

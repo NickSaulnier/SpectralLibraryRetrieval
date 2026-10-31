@@ -19,3 +19,6 @@ data/**
 # Notebook outputs (notebooks are kept as jupytext .py files)
 notebooks/*.ipynb
 outputs/
+
+# Earthdata/OPeNDAP client config written by earthaccess (machine-specific)
+.dodsrc

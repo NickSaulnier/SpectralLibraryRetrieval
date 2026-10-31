@@ -128,6 +128,35 @@ def cmd_query(args: argparse.Namespace) -> None:
     print(format_matches(r.query(scene.pixel(args.row, args.col), args.k)[0]))
 
 
+def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
+    import numpy as np
+
+    from specret.eval.emit_l2bmin import compare_group2, load_l2bmin, summarize
+    from specret.io.download import CUPRITE_BBOX
+    from specret.io.emit import open_emit_l2a
+    from specret.schema import read_library
+    from specret.search.retrieve import Retriever
+    from specret.sensors.library import SensorLibrary
+
+    scene = open_emit_l2a(args.rfl)
+    l2b = load_l2bmin(args.min)
+    lib = SensorLibrary.load(args.library_npz)
+    canonical = read_library(args.library)
+    bbox = tuple(args.bbox) if args.bbox else CUPRITE_BBOX
+    for vector in args.vectors:
+        r = Retriever(lib, canonical, vector=vector)
+        r.check_bands(np.asarray(scene.centers_nm))
+        df = compare_group2(scene, l2b, r, bbox, min_depth=args.min_depth, k=args.k)
+        print(
+            f"\n=== vector {vector}: {len(df)} pixels, top-1 group agreement "
+            f"{df['top1_agree'].mean():.1%}, top-{args.k} {df['topk_agree'].mean():.1%}"
+        )
+        print(summarize(df).round(3).to_string())
+        if args.out:
+            Path(args.out).mkdir(parents=True, exist_ok=True)
+            df.to_parquet(Path(args.out) / f"l2bmin_compare_{vector}.parquet")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="specret", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -187,6 +216,18 @@ def main(argv: list[str] | None = None) -> None:
     q.add_argument("--lat", type=float)
     q.add_argument("--lon", type=float)
     q.set_defaults(func=cmd_query)
+
+    c = sub.add_parser("compare-l2bmin", help="agreement with the EMIT L2B mineral map")
+    c.add_argument("library_npz", help="library resampled to this scene's EMIT bands")
+    c.add_argument("--rfl", required=True, help="EMIT L2A RFL granule")
+    c.add_argument("--min", required=True, help="matching EMIT L2B MIN granule")
+    c.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    c.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"))
+    c.add_argument("--min-depth", type=float, default=0.05)
+    c.add_argument("--vectors", nargs="+", default=["sam", "swir2"])
+    c.add_argument("-k", type=int, default=5)
+    c.add_argument("--out", help="folder for per-pixel results (parquet)")
+    c.set_defaults(func=cmd_compare_l2bmin)
 
     args = p.parse_args(argv)
     if getattr(args, "qdrant_path", None):

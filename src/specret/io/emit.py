@@ -120,10 +120,9 @@ def search_emit(
     short_names: tuple[str, ...] = ("EMITL2ARFL",),
     cloud_cover_max: int | None = 20,
 ):
-    """Find EMIT granules over a (west, south, east, north) box. Needs an Earthdata login."""
+    """Find EMIT granules over a (west, south, east, north) box. Searching needs no login."""
     import earthaccess
 
-    earthaccess.login()
     results = []
     for name in short_names:
         kwargs = dict(short_name=name, bounding_box=bbox, temporal=temporal)
