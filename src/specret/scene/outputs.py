@@ -5,6 +5,7 @@ Layers (orthorectified with the scene's geometry lookup table):
 * top1_row.tif    int32 library row of the best match (-1 = no data); see library.csv
 * score.tif       float32 ranking score of the best match, 0-1
 * margin.tif      float32 score gap to the best candidate of another group (a confidence cue)
+* confidence.tif  float32 calibrated P(best group is right), when the map has it
 """
 
 from __future__ import annotations
@@ -78,6 +79,9 @@ def write_scene_maps(
         "score": (scene.orthorectify(smap.scores[..., 0]).astype(np.float32), np.nan, None),
         "margin": (scene.orthorectify(smap.margin).astype(np.float32), np.nan, None),
     }
+    if smap.p_correct is not None:
+        conf = scene.orthorectify(smap.p_correct).astype(np.float32)
+        layers["confidence"] = (conf, np.nan, None)
     paths = {}
     for name, (data, nodata, cmap) in layers.items():
         p = out_dir / f"{name}.tif"

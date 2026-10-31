@@ -121,10 +121,15 @@ $('map').addEventListener('click', async (ev) => {
 
 function render(d) {
   const s = d.summary;
+  const tier = { 'confident': 'high', 'uncertain': 'medium', 'likely unknown': 'low' }[s.confidence] || 'medium';
+  const pText = s.p_group_correct == null ? '' : `P(group right) ${s.p_group_correct.toFixed(2)}`;
+  const mix = d.unmixing && d.unmixing.components.length > 1
+    ? `<div class="hint">Unmixed: ${d.unmixing.components.map(c => `${c.material_name} ${(100 * c.fraction).toFixed(0)}%`).join(' + ')}</div>`
+    : '';
   $('verdict').innerHTML = s.best_material
     ? `<div class="verdict"><b>${s.best_material}</b><span>${(s.best_group || '').replaceAll('_', ' ')}</span>
-       <span class="pill ${s.confidence}">${s.confidence} confidence</span>
-       <span class="hint">score ${s.score.toFixed(2)}</span></div>`
+       <span class="pill ${tier}">${s.confidence}</span>
+       <span class="hint">${pText}</span></div>${mix}`
     : `<div class="verdict"><b>No match</b><span class="hint">${s.reason}</span></div>`;
   const wl = d.wavelengths_nm, norm = (a) => { const m = Math.max(...a.filter(Number.isFinite)); return a.map(v => v / m); };
   const colors = [css('--m1'), css('--m2'), css('--m3')];

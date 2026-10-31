@@ -174,6 +174,8 @@ Effort estimates assume part-time work. Phases 1–3 produce a usable tool. Phas
 
 ### Phase 4: Mixed pixels and unknown materials (2–4 weeks)
 
+**Status (2026-10-31):** done, with the open-set target missed: known-vs-unknown AUROC 0.72 against the 0.85 goal, though right-vs-wrong AUROC is 0.83 and calibration error 0.06. Unmixing raises component recall on mixtures and finds kaolin in 52% of EMIT kaolin pixels, against 21% for the best single match. See `results/phase4_unmix_openset.md`.
+
 This phase is what makes the tool trustworthy on real pixels.
 
 **Unmixing (`unmix/`)**

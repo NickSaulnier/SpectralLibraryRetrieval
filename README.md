@@ -2,9 +2,10 @@
 
 Identify materials from a measured spectrum (an EMIT or AVIRIS pixel, or a field spectrometer
 reading) by matching it against reference spectral libraries. The phased plan is in
-[PLAN.md](PLAN.md). This repository covers Phases 0–3: ingestion and sensor resampling, physics-based
+[PLAN.md](PLAN.md). This repository covers Phases 0–4: ingestion and sensor resampling, physics-based
 retrieval (continuum removal, rank fusion, feature-fit reranking) with a frozen benchmark,
-scene-scale mapping, a local viewer and MCP tools. Results are in `results/`.
+scene-scale mapping, a local viewer and MCP tools, retrieve-and-unmix, and calibrated
+confidence with unknown-material flagging. Results are in `results/`.
 
 ## Setup
 
@@ -68,9 +69,16 @@ To use the tools from Claude Code:
 claude mcp add specret -- uv run --directory D:/Projects/HyperspectralIndexing specret mcp
 ```
 
-Tools: `list_resources`, `identify_spectrum`, `identify_pixel`, `explain_match`,
-`identify_field_spectrum`, `library_entry`, `map_scene`, `job_status`, `scene_summary`.
-See `results/phase3_mapping.md`.
+Tools: `list_resources`, `identify_spectrum`, `identify_pixel`, `unmix_pixel`,
+`unmix_spectrum`, `explain_match`, `identify_field_spectrum`, `library_entry`, `map_scene`,
+`job_status`, `scene_summary`. Every answer carries a calibrated P(group is right) and a tier
+(confident / uncertain / likely unknown). See `results/phase3_mapping.md` and
+`results/phase4_unmix_openset.md`.
+
+```bash
+uv run specret calibrate data/resampled/emit/library.npz      # -> configs/calibration/emit.json
+uv run specret eval-unmix data/resampled/emit/library.npz     # synthetic mixture benchmark
+```
 
 ## Layout
 

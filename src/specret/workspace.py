@@ -50,7 +50,7 @@ class Workspace:
     _libs: dict[str, SensorLibrary] = field(default_factory=dict)
     _retrievers: dict[str, HybridRetriever] = field(default_factory=dict)
     _scenes: dict[str, object] = field(default_factory=dict)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _lock: threading.RLock = field(default_factory=threading.RLock)
 
     # --- discovery -------------------------------------------------------------------
 
@@ -129,12 +129,51 @@ class Workspace:
             return refl
         return resample(wl, refl, s.centers_nm, s.fwhm_nm, lib_fwhm=native_fwhm_nm)
 
-    def identify(self, spectrum: np.ndarray, sensor: str, k: int = 5) -> dict:
+    def confidence_model(self, sensor: str):
+        """Calibrated model from configs/calibration/<sensor>.json, or None."""
+        from specret.openset.calibrate import ConfidenceModel
+
+        path = self.root / "configs/calibration" / f"{sensor}.json"
+        return ConfidenceModel.load(path) if path.exists() else None
+
+    def noise_curve(self, sensor: str) -> np.ndarray | None:
+        path = self.root / "data/derived" / f"{sensor}_noise.npy"
+        if path.exists():
+            curve = np.load(path)
+            if curve.size == self.library(sensor).sensor.n_bands:
+                return curve
+        return None
+
+    def unmixer(self, sensor: str):
+        from specret.unmix.pursuit import Unmixer
+
+        key = f"unmix:{sensor}"
+        with self._lock:
+            if key not in self._retrievers:
+                self._retrievers[key] = Unmixer(self.retriever(sensor), self.canonical)
+            return self._retrievers[key]
+
+    def identify(self, spectrum: np.ndarray, sensor: str, k: int = 5, unmix: bool = False) -> dict:
         r = self.retriever(sensor)
         matches = r.query(spectrum, k=k, with_explain=True)[0]
         for m in matches:
             m["features"] = m.get("features", [])[:4]
-        return jsonable({"sensor": sensor, "summary": _summary(matches), "matches": matches})
+        p = None
+        model = self.confidence_model(sensor)
+        if model is not None and matches:
+            from specret.openset.calibrate import confidence_features
+
+            _, feats = confidence_features(r, spectrum)
+            p = float(model.predict(feats)[0])
+        out = {"sensor": sensor, "summary": _summary(matches, p), "matches": matches}
+        if unmix:
+            out["unmixing"] = self.unmix(spectrum, sensor)
+        return jsonable(out)
+
+    def unmix(self, spectrum: np.ndarray, sensor: str) -> dict | None:
+        u = self.unmixer(sensor)
+        result = u.unmix(np.asarray(spectrum, dtype=np.float64), self.noise_curve(sensor))
+        return None if result is None else jsonable(u.describe(result, self.canonical))
 
     def explain(self, spectrum: np.ndarray, sensor: str, spectrum_id: str) -> dict:
         r = self.retriever(sensor)
@@ -176,24 +215,37 @@ class Workspace:
         return out
 
 
-def _summary(matches: list[dict]) -> dict:
-    """Plain-language headline for the best match."""
+CONFIDENT = 0.5  # calibrated P(best group is right) at or above which the answer stands
+UNKNOWN_BELOW = 0.3  # below this, report "likely not in the library"
+
+
+def confidence_tier(p: float | None) -> str:
+    if p is None:
+        return "uncalibrated"
+    if p >= CONFIDENT:
+        return "confident"
+    if p >= UNKNOWN_BELOW:
+        return "uncertain"
+    return "likely unknown"
+
+
+def _summary(matches: list[dict], p_correct: float | None = None) -> dict:
+    """Headline for the best match, with the calibrated probability that its group is right."""
     if not matches:
         return {"verdict": "no match", "reason": "too few usable bands or no absorption features"}
     top = matches[0]
     others = [m for m in matches[1:] if m.get("group") != top.get("group")]
-    margin = top["score"] - (others[0]["score"] if others else 0.0)
-    if top["score"] >= 0.8 and margin >= 0.1:
-        level = "high"
-    elif top["score"] >= 0.6:
-        level = "medium"
-    else:
-        level = "low"
+    tier = confidence_tier(p_correct)
     return {
         "best_material": top.get("material_name"),
         "best_group": top.get("group"),
         "score": top["score"],
-        "margin_to_other_group": margin,
-        "confidence": level,
-        "note": "Provisional confidence: calibrated open-set rejection arrives in Phase 4.",
+        "margin_to_other_group": top["score"] - (others[0]["score"] if others else 0.0),
+        "p_group_correct": p_correct,
+        "confidence": tier,
+        "verdict": (
+            "likely a material not in the library, or misidentified"
+            if tier == "likely unknown"
+            else f"{top.get('group')} ({tier})"
+        ),
     }

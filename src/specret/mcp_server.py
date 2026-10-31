@@ -21,8 +21,11 @@ INSTRUCTIONS = """\
 Tools for identifying materials from reflectance spectra (EMIT, AVIRIS, field spectrometers)
 against the USGS spectral library. Start with `list_resources`. Scores are 0-1; matches carry
 per-window absorption-feature evidence (band centre and depth of query vs. library spectrum).
-Confidence is provisional until open-set rejection is added: treat 'low' as "possibly a
-material not in the library". Mineral groups follow configs/taxonomy.yaml.
+Each answer carries `p_group_correct`, a calibrated probability that the best match's
+mineral group is right, and a tier: confident (>= 0.5), uncertain (0.3-0.5) or
+"likely unknown" (< 0.3, probably a material missing from the library). Pixels are often
+mixtures: use `unmix_pixel` to split one into library endmembers with fractions.
+Mineral groups follow configs/taxonomy.yaml.
 """
 
 JOBS: dict[str, dict] = {}
@@ -82,6 +85,36 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
         if hasattr(scene, "lat"):
             out["pixel"].update(lat=float(scene.lat[row, col]), lon=float(scene.lon[row, col]))
         return jsonable(out)
+
+    @mcp.tool
+    def unmix_pixel(
+        scene_id: str,
+        row: int | None = None,
+        col: int | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+    ) -> dict:
+        """Split a scene pixel into up to three library endmembers with relative fractions.
+
+        Also returns the best single match and its calibrated confidence for comparison.
+        """
+        scene = ws.scene(scene_id)
+        if lat is not None and lon is not None:
+            row, col = scene.nearest_pixel(lat, lon)
+        if row is None or col is None:
+            raise ValueError("give row and col, or lat and lon")
+        sensor = ws.sensor_for_scene(scene)
+        out = ws.identify(scene.pixel(row, col), sensor, k=3, unmix=True)
+        out["pixel"] = {"row": row, "col": col}
+        return jsonable(out)
+
+    @mcp.tool
+    def unmix_spectrum(
+        wavelengths_nm: list[float], reflectance: list[float], sensor: str = "emit"
+    ) -> dict:
+        """Split a reflectance spectrum into up to three library endmembers."""
+        x = ws.to_sensor(wavelengths_nm, reflectance, sensor)
+        return ws.identify(x, sensor, k=3, unmix=True)
 
     @mcp.tool
     def explain_match(
@@ -155,7 +188,8 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
             try:
                 scene = ws.scene(scene_id)
                 r = ws.retriever(ws.sensor_for_scene(scene))
-                smap = run_map(scene, r, ws.canonical, progress=False)
+                model = ws.confidence_model(ws.sensor_for_scene(scene))
+                smap = run_map(scene, r, ws.canonical, progress=False, confidence=model)
                 out = ws.map_dir(scene_id)
                 smap.save(out / "scene_map.npz")
                 paths = write_scene_maps(smap, scene, ws.canonical, out)
@@ -183,12 +217,13 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
     def scene_summary(
         scene_id: str,
         bbox: list[float] | None = None,
-        min_score: float = 0.6,
+        min_p: float = 0.3,
         top: int = 12,
     ) -> dict:
         """Mineral-group composition of a mapped scene, optionally inside [W, S, E, N].
 
-        Pixels whose best-match score is below `min_score` are reported as low_confidence.
+        Pixels whose calibrated P(group correct) is below `min_p` are reported as
+        "likely_unknown".
         """
         from specret.scene.mapper import SceneMap, group_fractions
 
@@ -200,13 +235,13 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
         if bbox is not None:
             scene = ws.scene(scene_id)
             lat, lon = scene.lat, scene.lon
-        df = group_fractions(smap, lat, lon, tuple(bbox) if bbox else None, min_score)
+        df = group_fractions(smap, lat, lon, tuple(bbox) if bbox else None, min_p)
         rows = [
             {
                 "group": g,
                 "pixels": int(r.pixels),
                 "fraction": float(r.fraction),
-                "median_score": float(r.median_score),
+                "median_p_correct": float(r.median_p),
             }
             for g, r in df.head(top).iterrows()
         ]

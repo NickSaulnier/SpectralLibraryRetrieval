@@ -255,7 +255,10 @@ def cmd_map_scene(args: argparse.Namespace) -> None:
         chapters=chapters,
         sff_weight=args.sff_weight,
     )
-    smap = map_scene(scene, r, canonical, k=args.k)
+    from specret.workspace import Workspace
+
+    model = Workspace().confidence_model(r.lib.sensor.name)
+    smap = map_scene(scene, r, canonical, k=args.k, confidence=model)
     out = Path(args.out or f"outputs/maps/{Path(args.scene).stem}")
     smap.save(out / "scene_map.npz")
     paths = write_scene_maps(smap, scene, canonical, out)
@@ -274,6 +277,64 @@ def _open_scene(path: str):
     from specret.io.aviris import open_aviris
 
     return open_aviris(path)
+
+
+def cmd_calibrate(args: argparse.Namespace) -> None:
+    from specret.distort.simulator import load_noise_curve
+    from specret.eval.openset_eval import (
+        build_table,
+        coverage_at_threshold,
+        cross_validate,
+        fit_final,
+        report,
+    )
+    from specret.eval.splits import load_splits
+    from specret.schema import read_library
+    from specret.sensors.library import SensorLibrary
+
+    lib = SensorLibrary.load(args.library_npz)
+    noise = load_noise_curve(args.noise, lib.sensor.n_bands)
+    table, _ = build_table(lib, read_library(args.library), load_splits(), noise)
+    cv = cross_validate(table)
+    print(
+        f"{lib.sensor.name}: {int(cv['known'].sum())} known and "
+        f"{int((~cv['known']).sum())} unknown evaluation queries (cross-validated)"
+    )
+    print(report(cv).round(3).to_string())
+    for th in (0.3, 0.5):
+        print({k: round(v, 3) for k, v in coverage_at_threshold(cv, th).items()})
+    out = Path(args.out or f"configs/calibration/{lib.sensor.name}.json")
+    fit_final(table, threshold=args.threshold).save(out)
+    print(f"wrote {out}")
+
+
+def cmd_eval_unmix(args: argparse.Namespace) -> None:
+    from specret.distort.simulator import load_noise_curve
+    from specret.eval.benchmark import _subset
+    from specret.eval.mixtures import evaluate, make_mixtures, summarize
+    from specret.eval.splits import load_splits
+    from specret.schema import read_library
+    from specret.search.hybrid import HybridRetriever
+    from specret.sensors.library import SensorLibrary
+    from specret.unmix.pursuit import Unmixer
+
+    lib = SensorLibrary.load(args.library_npz)
+    canonical = read_library(args.library)
+    splits = load_splits()
+    noise = load_noise_curve(args.noise, lib.sensor.n_bands)
+    ref_splits = ("train",) if args.split == "val" else ("train", "val")
+    ref = _subset(lib, set(splits.loc[splits["split"].isin(ref_splits), "spectrum_id"]))
+    queries = _subset(lib, set(splits.loc[splits["split"] == args.split, "spectrum_id"]))
+    groups = canonical.set_index("spectrum_id").loc[queries.spectrum_ids, "group"].to_numpy()
+    q, truth = make_mixtures(queries, groups, args.n, noise)
+    df = evaluate(Unmixer(HybridRetriever(ref, canonical), canonical), q, truth, noise)
+    print(summarize(df).round(3).to_string())
+    for method, part in df.groupby("method"):
+        r, p = part["recall"].mean(), part["precision"].mean()
+        print(
+            f"{method}: recall {r:.3f} precision {p:.3f} F1 {2 * r * p / (r + p):.3f} "
+            f"abundance RMSE {part['abundance_rmse'].mean():.3f}"
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -381,6 +442,22 @@ def main(argv: list[str] | None = None) -> None:
 
     mc = sub.add_parser("mcp", help="run the FastMCP tool server (stdio)")
     mc.set_defaults(func=lambda _args: __import__("specret.mcp_server").mcp_server.main())
+
+    cal = sub.add_parser("calibrate", help="fit the confidence / unknown-material model")
+    cal.add_argument("library_npz")
+    cal.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    cal.add_argument("--noise", default="data/derived/emit_noise.npy")
+    cal.add_argument("--threshold", type=float, default=0.5)
+    cal.add_argument("--out")
+    cal.set_defaults(func=cmd_calibrate)
+
+    eu = sub.add_parser("eval-unmix", help="synthetic mixture benchmark for unmixing")
+    eu.add_argument("library_npz")
+    eu.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    eu.add_argument("--noise", default="data/derived/emit_noise.npy")
+    eu.add_argument("--split", default="test", choices=["val", "test"])
+    eu.add_argument("-n", type=int, default=300)
+    eu.set_defaults(func=cmd_eval_unmix)
 
     ms = sub.add_parser("map-scene", help="map every pixel of a scene with the hybrid retriever")
     ms.add_argument("library_npz", help="library resampled to this scene's bands")

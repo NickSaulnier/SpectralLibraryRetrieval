@@ -18,9 +18,11 @@ from fastapi.responses import HTMLResponse, Response
 
 from specret.scene.mapper import SceneMap
 from specret.scene.outputs import group_codes, group_colors
-from specret.workspace import Workspace, jsonable
+from specret.workspace import UNKNOWN_BELOW, Workspace, jsonable
 
 STATIC = Path(__file__).parent / "static"
+UNKNOWN_CODE = 255  # map code for pixels whose calibrated confidence is below UNKNOWN_BELOW
+UNKNOWN_RGB = (128, 128, 128)
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
@@ -44,6 +46,8 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         code = np.zeros(smap.shape, dtype=np.uint8)
         valid = top1 >= 0
         code[valid] = [codes.get(g, 0) for g in smap.library_groups[top1[valid]]]
+        if smap.p_correct is not None:
+            code[valid & (smap.p_correct < UNKNOWN_BELOW)] = UNKNOWN_CODE
         return scene.orthorectify(code, fill=0).astype(np.uint8), codes
 
     def spectrum_payload(sensor: str, query: np.ndarray, result: dict) -> dict:
@@ -88,6 +92,7 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         palette = np.zeros((256, 3), dtype=np.uint8)
         for c, rgba in colors.items():
             palette[c] = rgba[:3]
+        palette[UNKNOWN_CODE] = UNKNOWN_RGB
         pil = Image.fromarray(img, mode="P")
         pil.putpalette(palette.flatten().tolist())
         buf = io.BytesIO()
@@ -105,6 +110,15 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
             for g, c in codes.items()
             if counts[c] > 0
         ]
+        if counts[UNKNOWN_CODE]:
+            rows.append(
+                {
+                    "group": f"low confidence (P < {UNKNOWN_BELOW})",
+                    "code": UNKNOWN_CODE,
+                    "rgb": list(UNKNOWN_RGB),
+                    "fraction": counts[UNKNOWN_CODE] / total,
+                }
+            )
         return jsonable(sorted(rows, key=lambda r: -r["fraction"]))
 
     @app.get("/api/pixel/{scene_id}")
@@ -119,7 +133,7 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         row, col = gy - 1, gx - 1
         sensor = ws.sensor_for_scene(scene)
         spectrum = scene.pixel(row, col)
-        result = ws.identify(spectrum, sensor, k=5)
+        result = ws.identify(spectrum, sensor, k=5, unmix=True)
         result["pixel"] = {
             "row": row,
             "col": col,

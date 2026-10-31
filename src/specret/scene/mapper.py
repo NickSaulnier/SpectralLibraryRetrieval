@@ -32,6 +32,7 @@ class SceneMap:
     scores: np.ndarray  # (rows, cols, k) float32 combined ranking score in [0, 1]
     margin: np.ndarray  # (rows, cols) float32: top-1 score minus best other-group score
     seconds: float = 0.0
+    p_correct: np.ndarray | None = None  # (rows, cols) calibrated P(top-1 group is right)
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -60,6 +61,7 @@ class SceneMap:
             scores=self.scores,
             margin=self.margin,
             seconds=self.seconds,
+            p_correct=self.p_correct if self.p_correct is not None else np.array([]),
         )
 
     @classmethod
@@ -73,6 +75,7 @@ class SceneMap:
             z["scores"],
             z["margin"],
             float(z["seconds"]),
+            z["p_correct"] if "p_correct" in z and z["p_correct"].size else None,
         )
 
 
@@ -96,8 +99,13 @@ def map_scene(
     k: int = 5,
     block_rows: int = 64,
     progress: bool = True,
+    confidence=None,
 ) -> SceneMap:
-    """Rank every pixel of `scene` (EmitScene or AvirisScene) against the library."""
+    """Rank every pixel of `scene` (EmitScene or AvirisScene) against the library.
+
+    With a `confidence` model (openset.calibrate.ConfidenceModel) each pixel also gets a
+    calibrated P(top-1 group is right).
+    """
     retriever.check_bands(np.asarray(scene.centers_nm))
     lib_ids = retriever.lib.spectrum_ids
     groups = canonical.set_index("spectrum_id").loc[lib_ids, "group"].fillna("").to_numpy()
@@ -105,6 +113,7 @@ def map_scene(
     top_rows = np.full((n_rows, n_cols, k), NO_DATA, dtype=np.int32)
     scores = np.full((n_rows, n_cols, k), np.nan, dtype=np.float32)
     margin = np.full((n_rows, n_cols), np.nan, dtype=np.float32)
+    p_correct = np.full((n_rows, n_cols), np.nan, dtype=np.float32) if confidence else None
 
     t0 = time.perf_counter()
     starts = range(0, n_rows, block_rows)
@@ -114,7 +123,8 @@ def map_scene(
         has_data = np.isfinite(block).any(axis=1)
         if not has_data.any():
             continue
-        ranked = retriever.rank(block[has_data].astype(np.float64))
+        spectra = block[has_data].astype(np.float64)
+        ranked = retriever.rank(spectra)
         rows = ranked.rows[:, :k]
         sc = ranked.combined[:, :k]
         sc = np.where(np.isfinite(sc), sc, np.nan)
@@ -129,6 +139,13 @@ def map_scene(
         top_rows[r0:r1] = flat_rows.reshape(r1 - r0, n_cols, k)
         scores[r0:r1] = flat_scores.reshape(r1 - r0, n_cols, k)
         margin[r0:r1] = flat_margin.reshape(r1 - r0, n_cols)
+        if confidence is not None:
+            from specret.openset.calibrate import confidence_features
+
+            _, feats = confidence_features(retriever, spectra, ranked)
+            flat_p = np.full(block.shape[0], np.nan, dtype=np.float32)
+            flat_p[has_data] = confidence.predict(feats)
+            p_correct[r0:r1] = flat_p.reshape(r1 - r0, n_cols)
 
     return SceneMap(
         str(getattr(scene, "path", getattr(scene, "hdr_path", ""))),
@@ -138,6 +155,7 @@ def map_scene(
         scores,
         margin,
         time.perf_counter() - t0,
+        p_correct,
     )
 
 
@@ -146,11 +164,12 @@ def group_fractions(
     lat: np.ndarray | None = None,
     lon: np.ndarray | None = None,
     bbox: tuple[float, float, float, float] | None = None,
-    min_score: float = 0.0,
+    min_p: float = 0.0,
 ) -> pd.DataFrame:
     """Share of mapped pixels per top-1 group, optionally inside a (W, S, E, N) box.
 
-    Pixels whose top-1 score is below `min_score` count as "low_confidence".
+    Pixels whose calibrated P(correct) is below `min_p` count as "likely_unknown". Maps
+    without a confidence layer fall back to the raw top-1 score.
     """
     sel = smap.valid.copy()
     if bbox is not None:
@@ -159,15 +178,14 @@ def group_fractions(
         west, south, east, north = bbox
         sel &= (lon >= west) & (lon <= east) & (lat >= south) & (lat <= north)
     groups = smap.top1_group()[sel].astype(str)
-    low = smap.scores[..., 0][sel] < min_score
-    groups[low] = "low_confidence"
+    conf = smap.p_correct if smap.p_correct is not None else smap.scores[..., 0]
+    c = conf[sel]
+    groups[c < min_p] = "likely_unknown"
     counts = pd.Series(groups).value_counts()
     return pd.DataFrame(
         {
             "pixels": counts,
             "fraction": counts / max(int(sel.sum()), 1),
-            "median_score": [
-                float(np.nanmedian(smap.scores[..., 0][sel][groups == g])) for g in counts.index
-            ],
+            "median_p": [float(np.nanmedian(c[groups == g])) for g in counts.index],
         }
     )

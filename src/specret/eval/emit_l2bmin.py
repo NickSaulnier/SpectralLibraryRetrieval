@@ -123,3 +123,42 @@ def summarize(df: pd.DataFrame, min_pixels: int = 50) -> pd.DataFrame:
         }
     )
     return out[out["pixels"] >= min_pixels].sort_values("pixels", ascending=False)
+
+
+def unmix_group2(
+    scene,
+    l2b: L2BMin,
+    unmixer,
+    bbox: tuple[float, float, float, float],
+    min_depth: float = 0.05,
+    per_group: int = 300,
+    noise_sigma: np.ndarray | None = None,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Unmix a random sample of L2B ~2 um pixels per group; compare top-1 and any-component."""
+    west, south, east, north = bbox
+    in_box = (l2b.lon > west) & (l2b.lon < east) & (l2b.lat > south) & (l2b.lat < north)
+    sel = in_box & (l2b.group2_id > 0) & (l2b.group2_depth >= min_depth)
+    rows, cols = np.nonzero(sel)
+    ref = np.array([coarse_group(l2b.names.get(int(i), "")) for i in l2b.group2_id[rows, cols]])
+    rng = np.random.default_rng(seed)
+    records = []
+    for g in np.unique(ref):
+        idx = np.flatnonzero(ref == g)
+        for i in rng.choice(idx, min(per_group, idx.size), replace=False):
+            x = scene.pixel(int(rows[i]), int(cols[i]))
+            u = unmixer.unmix(x, noise_sigma)
+            if u is None:
+                continue
+            comp = [unmixer.groups[r] for r in u.rows]
+            records.append(
+                {
+                    "l2b_group": g,
+                    "top1_group": comp[0],
+                    "components": comp,
+                    "n_components": len(comp),
+                    "top1_agree": comp[0] == g,
+                    "any_agree": g in comp,
+                }
+            )
+    return pd.DataFrame(records)
