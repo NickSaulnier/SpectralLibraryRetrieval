@@ -2,7 +2,7 @@
 
 **Goal:** a working tool that takes a measured spectrum (an EMIT or AVIRIS pixel, or a field spectrometer reading) and returns the most likely materials from a reference library. Each answer comes with a calibrated confidence, an "unknown" option, and abundances for mixed pixels, and the tool is usable from a viewer and from an LLM agent through MCP tools.
 
-**What success means:** on real Cuprite scenes from both EMIT and AVIRIS, and on your field spectra, the tool beats a plain SAM baseline by a clear margin. It also says "unknown" instead of guessing when a material isn't in the library. Every results table includes the SAM row, because that's how you know the extra machinery is earning its keep.
+**What success means:** on real Cuprite scenes from both EMIT and AVIRIS, and on public field spectra, the tool beats a plain SAM baseline by a clear margin. It also says "unknown" instead of guessing when a material isn't in the library. Every results table includes the SAM row, because that's how you know the extra machinery is earning its keep.
 
 **Local environment (checked 2026-10-31):** Windows 11, Python 3.11.9, `uv` 0.12.7, Docker 29.3, RTX 4090 (24 GB). The project folder is not a git repo yet.
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | Target outcome | **Working tool** | The usable path comes first: physics reranking, then scene mapping, viewer and MCP, then unmixing and open-set rejection. The learned encoder is a later, optional upgrade, adopted only if it beats the physics pipeline on real data. Paper-only work (sparse-unmixing and MESMA comparisons, literature review, full ablations) is dropped or optional. |
 | Primary sensor | **Both EMIT and AVIRIS** | Both loaders and sensor configs are built in Phase 1, and every real-data evaluation reports both. AVIRIS covers AVIRIS-Classic Cuprite and AVIRIS-NG where it's available. |
-| Field spectrometer data | **Some available now** | Field ingestion is added in Phase 1, and field spectra become a labelled real-world test set (Section 3.4). |
+| Field spectrometer data | **None owned: use public ASD data** | ASD binary (`.asd`) is the target format because public mineral field datasets exist in it (Section 3.4). A CSV/ASCII reader covers exported data too. Field spectra become a labelled real-world test set. |
 | Radiative-transfer engine | **ISOFIT + sRTMnet (default, not yet confirmed)** | Used only for the atmospheric residual bank in Phase 5. htrdr was considered and set aside. |
 
 ---
@@ -30,7 +30,7 @@
    - Where the library's own resolution approaches the sensor's (parts of the Beckman SWIR, for example), convolve with an effective width of `sqrt(fwhm_sensor² − fwhm_lib²)`. splib07 ships per-instrument bandpass files for this.
 5. **Residual queries in the unmixing loop.** A fit residual can be negative and isn't a reflectance spectrum. The unmixing loop therefore matches residuals by direct inner product against unit-length library spectra (non-negative orthogonal matching pursuit). Retrieval candidates seed only the first iteration.
 6. **One distortion simulator, two jobs.** The physics-based simulator built in Phase 2 drives the synthetic benchmark, and later the encoder's training augmentation if Phase 5 goes ahead. The two must use separate random draws. Synthetic results are a sanity check only. Real scenes and field spectra decide whether a change ships.
-7. **Tetracorder overlap.** The USGS Cuprite maps and the EMIT L2B mineral maps both come from Tetracorder, which uses the same splib library and expert-defined features. Agreement with them measures agreement with Tetracorder, not ground truth. Reusing Tetracorder's feature definitions for reranking pushes agreement up further. Report it as "agreement with Tetracorder". Your field spectra are an independent check (Section 3.4).
+7. **Tetracorder overlap.** The USGS Cuprite maps and the EMIT L2B mineral maps both come from Tetracorder, which uses the same splib library and expert-defined features. Agreement with them measures agreement with Tetracorder, not ground truth. Reusing Tetracorder's feature definitions for reranking pushes agreement up further. Report it as "agreement with Tetracorder". Public field spectra are an independent check (Section 3.4).
 
 ---
 
@@ -64,7 +64,7 @@ HyperspectralIndexing/
 ├── tests/
 └── data/                       # gitignored
     ├── raw/                    # untouched downloads, one folder per source
-    ├── field/                  # your field spectra + metadata sheet
+    ├── field/                  # public field spectra + metadata sheet
     ├── canonical/              # library.parquet (native resolution, source of truth)
     ├── resampled/              # <sensor>/library.npz (matrix + band mask + ids)
     ├── scenes/                 # EMIT / AVIRIS-Classic / AVIRIS-NG
@@ -92,7 +92,7 @@ Effort estimates assume part-time work. Phases 1–3 produce a usable tool. Phas
   - **EMIT L2A reflectance** granules over Cuprite (~37.53°N, 117.20°W), plus the matching **EMIT L2B mineral** granules. Pick a clear, low-water-vapour acquisition.
   - **AVIRIS-Classic Cuprite** (1995/1997 reflectance) and **AVIRIS-NG** Cuprite flights, if any exist.
   - The published USGS Tetracorder Cuprite maps, with a plan for georegistering them. This is the riskiest item, so start it first.
-- **Field data:** copy your spectra into `data/field/raw/`. Create `data/field/metadata.csv` with one row per spectrum: file, instrument, date, lat/lon if known, the material or sample if known, and notes.
+- **Field data:** download a public ASD dataset (Section 3.4) into `data/field/raw/`. Fill in `data/field/metadata.csv` with one row per spectrum: file, instrument, date, lat/lon if known, the material or sample if known, and notes.
 - Defer RELAB and EcoSIS until there's a concrete need.
 
 **Exit:** all raw data is on disk with a `data/raw/MANIFEST.md` listing source URL, version or DOI, date and licence. Qdrant is running and the field metadata sheet exists.
@@ -112,7 +112,7 @@ Effort estimates assume part-time work. Phases 1–3 produce a usable tool. Phas
 - `search/gpu_exact.py`: L2-normalize after masking, then cosine top-k. `qdrant_store.py` builds the `sam` vector for each sensor collection. A test checks that Qdrant and GPU-exact search return the same ranking.
 - Notebooks:
   - `02_cuprite_mvp`: pick an EMIT or AVIRIS pixel and plot it against its top-5 matches. Check the known Cuprite zones: alunite, kaolinite, buddingtonite (the "Buddingtonite Bump"), calcite, muscovite, opal/chalcedony.
-  - `03_field_check`: the same plot for your field spectra.
+  - `03_field_check`: the same plot for a field spectrum.
 
 **Exit:**
 - The resampler check passes.
@@ -129,7 +129,7 @@ Effort estimates assume part-time work. Phases 1–3 produce a usable tool. Phas
 **2b. Distortion simulator (`distort/`), kept lean for the tool**
 - Linear areal mixtures with the dominant fraction ≥ τ.
 - Brightness scaling, slight slope tilt, and a dark (shade) endmember.
-- Wavelength-dependent noise: from EMIT `reflectance_uncertainty`, from the AVIRIS scene-based estimates, and from your field instrument's noise.
+- Wavelength-dependent noise: from EMIT `reflectance_uncertainty`, from the AVIRIS scene-based estimates, and from the field instrument's noise.
 - Small band-centre shifts (±1 nm) and FWHM changes (±10%).
 - Simple parametric atmospheric residuals: Gaussian-shaped errors at 0.94, 1.14, 1.4 and 1.9 µm.
 - Named severity recipes: "clean", "noise", "mix-70", "atm-mild", "atm-strong", "all".
@@ -230,11 +230,12 @@ This is manual work and easy to underestimate, so budget time for it in Phase 2a
   - field file parsing against a known-good reference export.
 
 ### 3.4 Field spectrometer data
-- **Formats (`io/field.py`):**
-  - ASD binary `.asd`, via the `specdal` package or a small direct parser;
-  - SVC `.sig` and Spectral Evolution `.sed`, which are text formats;
-  - generic CSV/ASCII exports.
-  Confirm which ones you have before building parsers for the others.
+- **Formats (`io/field.py`):** ASD binary `.asd` (a direct parser, including the white reference stored in version 6+ files) and CSV/ASCII exports in long or EcoSIS-style wide layout. SVC `.sig` and Spectral Evolution `.sed` can be added if a dataset needs them.
+- **Public ASD datasets** (no field data of our own yet):
+  - **Coso geothermal alteration minerals** (OpenEI): alunite, chalcedony, epidote, hematite, kaolinite and opal, with raw `.asd` plus ASCII copies. The closest match to the Cuprite mineral suite. Check its licence before redistributing anything.
+  - **USGS Smith Creek Valley, Nevada** (DOI 10.5066/P9E2TSDF): ASD Indico `.asd` files of field samples, with CSV metadata. Public.
+  - **USGS Black Rock Desert, Nevada, August 2022** (DOI 10.5066/P94QAHLC): ASD FieldSpec 4 Hi-Res NG over a calibration playa, CC0. Useful for the lab-to-image chain if an EMIT or AVIRIS overpass is close in time.
+- **Validate the ASD reader** on one of these before trusting it: it has only been tested on synthetic files. The Coso ASCII copies give a direct check.
 - **Preprocessing:**
   - Splice correction at the detector joins (about 1000 and 1800 nm on ASD instruments), in `preprocess/splice.py`.
   - Convert radiance or DN to reflectance using the white-reference panel if a file isn't already reflectance.
@@ -262,7 +263,7 @@ This is manual work and easy to underestimate, so budget time for it in Phase 2a
 | Hard pairs | Same data, filtered to the hard pairs | Same | Pairwise confusion |
 | Real: EMIT | Cuprite EMIT vs. L2B mineral maps and Tetracorder | All retrieval rows | Per-mineral and group agreement |
 | Real: AVIRIS | Cuprite AVIRIS-Classic and NG vs. Tetracorder maps | All retrieval rows | Per-mineral and group agreement |
-| Field | Your labelled field spectra | All retrieval rows | Top-1/top-5 accuracy, group accuracy |
+| Field | Labelled public field spectra (Coso first) | All retrieval rows | Top-1/top-5 accuracy, group accuracy |
 | Cross-sensor consistency | The same Cuprite ground seen by EMIT and AVIRIS | Hybrid | Group-level agreement between the two sensors' maps |
 | Mixtures | Synthetic mixtures with known fractions | Hybrid pursuit (+ SUnSAL, optional) | Component recall, abundance RMSE |
 | Unknown materials | Held-out classes | Each score and the combined score | AUROC, accuracy at coverage, ECE |
@@ -274,7 +275,7 @@ This is manual work and easy to underestimate, so budget time for it in Phase 2a
 | Risk | Impact | Mitigation |
 |---|---|---|
 | USGS Cuprite reference maps are hard to obtain or georegister | Weaker AVIRIS real-data numbers | Start the search in Phase 0. Fall back on EMIT L2B maps, which come on the EMIT grid, and lean on field spectra |
-| Field spectra lack material labels or locations | Field test set is small or unlabelled | Record what's known in the metadata sheet. Even unlabelled field spectra exercise ingestion and splice correction and show whether matches are plausible |
+| Public field datasets are small, unlabelled, or far from any overpass | Field test set is weak | Prefer the Coso set (labelled minerals). Record what's known in the metadata sheet. Even unlabelled spectra exercise ingestion and splice correction |
 | AVIRIS product formats and scaling vary between years | Wrong reflectance scale | Add a scale check to the loader and test against a known pixel |
 | Tetracorder overlap inflates agreement | Results look better than they are | Report it as agreement with Tetracorder, and use field spectra as the independent check |
 | Synthetic simulator is too clean | Choices tuned to the simulator don't carry over | Decide what ships from real-scene and field results, not synthetic numbers |
@@ -285,20 +286,18 @@ This is manual work and easy to underestimate, so budget time for it in Phase 2a
 ## 6. Open questions
 
 1. **Radiative-transfer engine:** ISOFIT with sRTMnet is the default. Only needed in Phase 5.
-2. **Field data details:**
-   - Which instrument and file format?
-   - Are the files reflectance or raw DN/radiance?
-   - Roughly how many spectra are there, and do they carry material labels?
-   - Were any taken at Cuprite or under an EMIT or AVIRIS flight?
+2. **Which public field dataset first:** Coso (labelled alteration minerals) is the default.
 
 ---
 
 ## 7. First-week checklist
 
-- [ ] `git init`, uv project skeleton, ruff, pytest, Qdrant in Docker
+- [x] `git init`, uv project skeleton, ruff, pytest, `docker-compose.yml` for Qdrant
+- [ ] Start the Qdrant server (`docker compose up -d`) and run `specret index` against it
 - [ ] Create the Earthdata account and test the `earthaccess` login
-- [ ] Download splib07 (a, b, the AVIRIS-convolved sets, wavelength and bandpass files) and the ECOSTRESS VSWIR files
+- [x] Download splib07a and the AVIRIS-2014-convolved set
+- [ ] Download the ECOSTRESS VSWIR files (request form, by hand)
 - [ ] Find the EMIT L2A and L2B mineral granules over Cuprite and download one clear scene
 - [ ] Find AVIRIS-Classic and AVIRIS-NG Cuprite reflectance, and start searching for the USGS Tetracorder maps
-- [ ] Copy field spectra into `data/field/raw/` and fill in `metadata.csv`
-- [ ] Write the splib07 parser, `library.parquet`, and the resampler with its validation test
+- [ ] Download a public ASD field dataset into `data/field/raw/` and fill in `metadata.csv`
+- [x] Write the splib07 parser, `library.parquet`, and the resampler with its validation test (median relative error 0.004% against USGS's AVIRIS-2014 convolution)

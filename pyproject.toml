@@ -1,0 +1,66 @@
+[project]
+name = "specret"
+version = "0.1.0"
+description = "Spectral library retrieval for imaging spectroscopy (EMIT, AVIRIS, field spectrometers)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "earthaccess>=0.11",
+    "matplotlib>=3.8",
+    "netcdf4>=1.7",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "pyyaml>=6",
+    "qdrant-client>=1.20",
+    "requests>=2.31",
+    "scipy>=1.13",
+    "spectral>=0.23",
+    "tqdm>=4.66",
+    "xarray>=2024.6",
+]
+
+[project.optional-dependencies]
+gpu = ["torch>=2.6"]
+
+[project.scripts]
+specret = "specret.cli:main"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29",
+    "jupytext>=1.16",
+    "pre-commit>=3.7",
+    "pytest>=8.2",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/specret"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", extra = "gpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["data: needs downloaded data under data/raw (skipped when absent)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "NPY"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*" = ["B018", "E402"]  # bare expressions display cell output

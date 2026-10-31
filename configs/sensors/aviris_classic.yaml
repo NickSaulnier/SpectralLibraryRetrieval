@@ -1,0 +1,8 @@
+name: avirisc
+description: AVIRIS-Classic (224 bands, ~10 nm). Default band set is the 2014 calibration shipped with splib07.
+# For a specific flight, read centres/FWHM from the scene's ENVI header instead (band_source: envi).
+band_source: usgs_files
+centers_file: data/raw/usgs_splib07/extracted/ASCIIdata_splib07b_cvAVIRISc2014/s07_AV14_Wavelengths_in_microns_224_ch_AVIRIS14a.txt
+fwhm_file: data/raw/usgs_splib07/extracted/ASCIIdata_splib07b_cvAVIRISc2014/s07_AV14_Resolution_in_microns_224_ch_AVIRIS14a.txt
+units: um
+bad_band_sets: [atmospheric_water, edges]

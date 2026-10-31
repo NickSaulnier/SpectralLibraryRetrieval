@@ -1,0 +1,18 @@
+# Wavelength ranges (nm, inclusive) excluded from matching.
+# Sensor configs list which named sets apply to them.
+
+atmospheric_water:
+  # Strong water-vapour absorption; near-zero signal and large correction residuals in image data.
+  - [1340, 1450]
+  - [1790, 1960]
+
+edges:
+  # Low-SNR detector edges.
+  - [0, 400]
+  - [2450, 3000]
+
+field_water:
+  # Field spectra are measured through the full atmosphere path, so the windows are wider.
+  - [1340, 1460]
+  - [1780, 1990]
+  - [2400, 3000]

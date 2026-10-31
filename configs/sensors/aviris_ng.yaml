@@ -1,0 +1,5 @@
+name: avirisng
+description: AVIRIS-NG L2 reflectance (~425 bands, ~5 nm sampling)
+# Band centres and FWHM come from the scene's ENVI header. Pass the .hdr with --band-file.
+band_source: envi
+bad_band_sets: [atmospheric_water, edges]

@@ -1,0 +1,4 @@
+name: prisma
+description: PRISMA L2D reflectance (~239 bands, ~12 nm, 30 m). Configuration only for now.
+band_source: envi
+bad_band_sets: [atmospheric_water, edges]

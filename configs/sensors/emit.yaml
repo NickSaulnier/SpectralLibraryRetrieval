@@ -1,0 +1,6 @@
+name: emit
+description: EMIT L2A surface reflectance (285 bands, 381-2493 nm, 60 m)
+# Band centres and FWHM are read from an L2A granule's sensor_band_parameters group,
+# so no table is hardcoded here. Pass the granule with --band-file.
+band_source: emit_l2a
+bad_band_sets: [atmospheric_water, edges]

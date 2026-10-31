@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+build/
+dist/
+
+# Data: everything under data/ is local, except the manifest and templates
+data/**
+!data/**/
+!data/README.md
+!data/raw/MANIFEST.md
+!data/field/metadata.csv
+
+# Notebook outputs (notebooks are kept as jupytext .py files)
+notebooks/*.ipynb
+outputs/
