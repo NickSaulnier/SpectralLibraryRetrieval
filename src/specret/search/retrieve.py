@@ -44,7 +44,20 @@ class Retriever:
         self.vector = vector
         self.mask = vector_masks(lib)[vector]
         vecs, ok = represent(lib.matrix, lib.sensor.centers_nm, self.mask, vector)
+        self.rows = np.flatnonzero(ok)  # index position -> row of self.lib
         self.index = ExactIndex(vecs[ok], lib.spectrum_ids[ok], device=device)
+
+    def search_rows(self, spectra: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+        """Top-k as (cosine, library row) arrays of shape (nq, k); row -1 for invalid queries."""
+        spectra = np.atleast_2d(spectra)
+        qv, ok = query_vectors(self.lib, spectra, kinds=(self.vector,))[self.vector]
+        k = min(k, len(self.index))
+        scores = np.full((len(spectra), k), np.nan, dtype=np.float32)
+        rows = np.full((len(spectra), k), -1, dtype=np.int64)
+        if ok.any():
+            s, i = self.index.search(qv[ok], k)
+            scores[ok], rows[ok] = s, self.rows[i]
+        return scores, rows
 
     def check_bands(self, centers_nm: np.ndarray) -> None:
         c = self.lib.sensor.centers_nm

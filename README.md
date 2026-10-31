@@ -3,7 +3,8 @@
 Identify materials from a measured spectrum (an EMIT or AVIRIS pixel, or a field spectrometer
 reading) by matching it against reference spectral libraries. The phased plan is in
 [PLAN.md](PLAN.md). This repository covers Phases 0–1 (ingestion, sensor resampling, SAM retrieval) and
-the start of Phase 2 (taxonomy, frozen splits, continuum removal). Results are in `results/`.
+most of Phase 2 (taxonomy, frozen splits, continuum removal, rank fusion, feature-fit
+reranking, synthetic benchmark). Results are in `results/`.
 
 ## Setup
 
@@ -40,11 +41,15 @@ uv run specret index data/resampled/avirisc/library.npz      # load into Qdrant
 uv run specret query data/resampled/emit/library.npz --emit <granule.nc> --lat 37.53 --lon -117.22
 uv run specret query data/resampled/field_asd/library.npz --field <spectrum.asd>
 uv run specret compare-l2bmin data/resampled/emit/library.npz --rfl <L2A RFL .nc> --min <L2B MIN .nc> --chapters M S C
+uv run specret noise-curve --rfl <L2A RFL .nc> --uncert <L2A RFLUNCERT .nc>   # EMIT noise model
+uv run specret benchmark data/resampled/emit/library.npz   # synthetic benchmark, frozen test split
 ```
 
 Search vectors: `sam` (raw reflectance, the baseline), `swir2` (2.0–2.5 µm), `cr` and
-`cr_swir2` (continuum-removed band depth; see `results/`). Material groups come from
-`configs/taxonomy.yaml`.
+`cr_swir2` (continuum-removed band depth). The default retriever, `hybrid`, fuses `sam`, `cr`
+and `cr_swir2` and reranks the candidates by fitting diagnostic absorption features
+(`configs/features.yaml`). Material groups come from `configs/taxonomy.yaml`. Results are in
+`results/`.
 
 Sensor definitions are in `configs/sensors/`. EMIT and AVIRIS-NG read their band centres from
 the scene file, so the library is resampled once per sensor configuration.

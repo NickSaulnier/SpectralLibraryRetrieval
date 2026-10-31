@@ -64,7 +64,7 @@ def write_splits(splits: pd.DataFrame, version: str, force: bool = False) -> Pat
     if path.exists() and not force:
         raise FileExistsError(f"{path} exists: splits are frozen, bump the version instead")
     splits.to_csv(path, index=False, lineterminator="\n")
-    (SPLITS_DIR / f"{version}.sha256").write_text(split_hash(splits) + "\n")
+    (SPLITS_DIR / f"{version}.sha256").write_text(split_hash(splits) + "\n", newline="\n")
     return path
 
 

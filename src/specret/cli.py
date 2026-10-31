@@ -148,7 +148,12 @@ def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     bbox = tuple(args.bbox) if args.bbox else CUPRITE_BBOX
     for vector in args.vectors:
         chapters = tuple(args.chapters) if args.chapters else None
-        r = Retriever(lib, canonical, vector=vector, chapters=chapters)
+        if vector in ("rrf", "hybrid"):
+            from specret.search.hybrid import HybridRetriever
+
+            r = HybridRetriever(lib, canonical, chapters=chapters, rerank=vector == "hybrid")
+        else:
+            r = Retriever(lib, canonical, vector=vector, chapters=chapters)
         r.check_bands(np.asarray(scene.centers_nm))
         df = compare_group2(scene, l2b, r, bbox, min_depth=args.min_depth, k=args.k)
         print(
@@ -178,6 +183,50 @@ def cmd_make_splits(args: argparse.Namespace) -> None:
     )
     print(counts.to_string())
     print(f"wrote {path}")
+
+
+def cmd_noise_curve(args: argparse.Namespace) -> None:
+    import numpy as np
+
+    from specret.distort.simulator import emit_noise_curve
+    from specret.io.download import CUPRITE_BBOX
+    from specret.io.emit import open_emit_l2a
+
+    scene = open_emit_l2a(args.rfl)
+    bbox = tuple(args.bbox) if args.bbox else CUPRITE_BBOX
+    curve = emit_noise_curve(args.uncert, scene.lat, scene.lon, bbox)
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    np.save(args.out, curve)
+    good = scene.good_mask
+    print(f"median uncertainty over good bands {np.nanmedian(curve[good]):.4f} -> {args.out}")
+
+
+def cmd_benchmark(args: argparse.Namespace) -> None:
+    import pandas as pd
+
+    from specret.distort.simulator import load_noise_curve
+    from specret.eval.benchmark import run_benchmark
+    from specret.eval.splits import load_splits
+    from specret.schema import read_library
+    from specret.sensors.library import SensorLibrary
+
+    lib = SensorLibrary.load(args.library_npz)
+    noise = load_noise_curve(args.noise, lib.sensor.n_bands)
+    df = run_benchmark(
+        lib, read_library(args.library), load_splits(), args.recipes, args.methods, noise, k=args.k
+    )
+    with pd.option_context("display.width", 200):
+        for metric in ("group_top1", f"group_recall@{args.k}", "material_top1"):
+            print(f"\n{metric} (n={df['n'].iloc[0]} test spectra)")
+            print(
+                df.pivot(index="recipe", columns="method", values=metric)
+                .reindex(index=args.recipes, columns=args.methods)
+                .round(3)
+                .to_string()
+            )
+    if args.csv:
+        Path(args.csv).parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(args.csv, index=False)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -245,6 +294,29 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--force", action="store_true", help="overwrite an existing version")
     s.set_defaults(func=cmd_make_splits)
 
+    n = sub.add_parser("noise-curve", help="per-band noise from an EMIT uncertainty granule")
+    n.add_argument("--rfl", required=True, help="EMIT L2A RFL granule (for lat/lon)")
+    n.add_argument("--uncert", required=True, help="matching EMIT L2A RFLUNCERT granule")
+    n.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"))
+    n.add_argument("--out", default="data/derived/emit_noise.npy")
+    n.set_defaults(func=cmd_noise_curve)
+
+    b = sub.add_parser("benchmark", help="synthetic benchmark on the frozen test split")
+    b.add_argument("library_npz")
+    b.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    b.add_argument("--noise", default="data/derived/emit_noise.npy")
+    b.add_argument(
+        "--recipes",
+        nargs="+",
+        default=["clean", "photometric", "noise", "mix", "atm-mild", "atm-strong", "jitter", "all"],
+    )
+    b.add_argument(
+        "--methods", nargs="+", default=["sam", "swir2", "cr", "cr_swir2", "rrf", "hybrid"]
+    )
+    b.add_argument("-k", type=int, default=5)
+    b.add_argument("--csv")
+    b.set_defaults(func=cmd_benchmark)
+
     c = sub.add_parser("compare-l2bmin", help="agreement with the EMIT L2B mineral map")
     c.add_argument("library_npz", help="library resampled to this scene's EMIT bands")
     c.add_argument("--rfl", required=True, help="EMIT L2A RFL granule")
@@ -252,7 +324,12 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--library", default=str(DEFAULT_CANONICAL))
     c.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"))
     c.add_argument("--min-depth", type=float, default=0.05)
-    c.add_argument("--vectors", nargs="+", default=["sam", "swir2", "cr", "cr_swir2"])
+    c.add_argument(
+        "--vectors",
+        nargs="+",
+        default=["sam", "cr_swir2", "rrf", "hybrid"],
+        help="sam, swir2, cr, cr_swir2, rrf (fusion of sam/cr/cr_swir2) or hybrid (rrf + SFF)",
+    )
     c.add_argument("-k", type=int, default=5)
     c.add_argument("--chapters", nargs="+", help="restrict the library, e.g. M S C")
     c.add_argument("--out", help="folder for per-pixel results (parquet)")

@@ -1,0 +1,31 @@
+# Diagnostic absorption windows for feature fitting (rerank/sff.py).
+#
+# Each window has a straight-line local continuum between its two ends (Tetracorder style).
+# Inside it, the query's and each candidate's band-depth profiles are compared by
+# shape (correlation) and band centre. Windows are generic rather than per-mineral, so every
+# candidate is scored on the same terms and the per-window breakdown explains the match.
+#
+# Feature positions (um) for reference: kaolinite doublet 2.165/2.205; alunite 2.165 + 2.32;
+# white mica 2.20 (+2.35); smectite 2.205; pyrophyllite 2.165; buddingtonite 2.02/2.12;
+# jarosite 2.265; Fe-OH chlorite/epidote 2.25 + 2.33-2.34; calcite 2.335-2.345;
+# dolomite 2.31-2.32; opal/chalcedony broad 2.21-2.26; hematite ~0.86, goethite ~0.92.
+
+center_sigma_nm: 8.0   # band-centre mismatch scale
+min_depth: 0.01        # a window with less depth than this has no feature
+
+windows:
+  nh4:
+    range_nm: [1990, 2150]
+    note: buddingtonite and other NH4-bearing minerals (2.02, 2.12 um)
+  al_oh:
+    range_nm: [2120, 2250]
+    note: Al-OH; kaolinite doublet, alunite, white mica, smectite, pyrophyllite
+  fe_oh:
+    range_nm: [2220, 2295]
+    note: jarosite 2.265, Fe-OH chlorite 2.25, broad Si-OH shoulder of opal
+  mg_oh_co3:
+    range_nm: [2280, 2400]
+    note: carbonates (calcite 2.34, dolomite 2.32), Mg-OH (chlorite, epidote, talc), alunite 2.32
+  fe3:
+    range_nm: [750, 1250]
+    note: ferric iron crystal-field band (hematite ~0.86 um, goethite ~0.92 um)
