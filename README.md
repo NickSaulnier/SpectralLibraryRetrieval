@@ -2,8 +2,8 @@
 
 Identify materials from a measured spectrum (an EMIT or AVIRIS pixel, or a field spectrometer
 reading) by matching it against reference spectral libraries. The phased plan is in
-[PLAN.md](PLAN.md). This repository currently covers Phases 0–1: ingestion, sensor resampling,
-and SAM-equivalent retrieval.
+[PLAN.md](PLAN.md). This repository covers Phases 0–1 (ingestion, sensor resampling, SAM retrieval) and
+the start of Phase 2 (taxonomy, frozen splits, continuum removal). Results are in `results/`.
 
 ## Setup
 
@@ -32,13 +32,19 @@ AVIRIS scenes and field datasets are fetched by hand; see the manifest.
 
 ```bash
 uv run specret ingest                               # -> data/canonical/library.parquet
+uv run specret make-splits                          # once: frozen sample-level split in configs/splits/
 uv run specret validate-resampler                   # compares against USGS's own convolution
 uv run specret resample --sensor aviris_classic     # -> data/resampled/avirisc/library.npz
 uv run specret resample --sensor emit --band-file data/scenes/emit/<EMIT_L2A_RFL_...>.nc
 uv run specret index data/resampled/avirisc/library.npz      # load into Qdrant
 uv run specret query data/resampled/emit/library.npz --emit <granule.nc> --lat 37.53 --lon -117.22
 uv run specret query data/resampled/field_asd/library.npz --field <spectrum.asd>
+uv run specret compare-l2bmin data/resampled/emit/library.npz --rfl <L2A RFL .nc> --min <L2B MIN .nc> --chapters M S C
 ```
+
+Search vectors: `sam` (raw reflectance, the baseline), `swir2` (2.0–2.5 µm), `cr` and
+`cr_swir2` (continuum-removed band depth; see `results/`). Material groups come from
+`configs/taxonomy.yaml`.
 
 Sensor definitions are in `configs/sensors/`. EMIT and AVIRIS-NG read their band centres from
 the scene file, so the library is resampled once per sensor configuration.

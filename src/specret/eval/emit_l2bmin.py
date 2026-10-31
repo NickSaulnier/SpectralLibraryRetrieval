@@ -4,13 +4,12 @@ L2B MIN comes from Tetracorder run on the same USGS library family (splib06), so
 measures agreement with Tetracorder, not ground truth (PLAN.md, Decision 7).
 
 The product has two layers: group 1 (~1 um Fe-bearing features) and group 2 (~2 um features
-of clays, micas, carbonates and sulfates). Phase 1 compares at a coarse mineral-group level.
-The groups here are a stopgap until configs/taxonomy.yaml exists (Phase 2a).
+of clays, micas, carbonates and sulfates). Agreement is measured at group and class level.
+Groups and classes come from configs/taxonomy.yaml.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,34 +18,16 @@ import numpy as np
 import pandas as pd
 
 from specret.search.retrieve import Retriever
-
-# Coarse groups for the ~2 um layer, matched on the first-named (dominant) mineral.
-COARSE_GROUPS = {
-    "alunite": r"^alun",
-    "kaolin": r"^(kaol|dickite|halloysite|nacrite)",
-    "white_mica": r"^(muscov|illite|sericite|paragon|phengite)",
-    "smectite": r"^(mont|na-mont|ca-mont|nontron|beidell|saponite|smect)",
-    "carbonate": r"^(calcite|dolomite|aragonite|magnesite|siderite|ankerite)",
-    "silica": r"^(chalcedony|opal|hyalite|chert)",
-    "buddingtonite": r"^budd",
-    "jarosite": r"^jaros",
-    "chlorite": r"^(chlorite|clinochl|chamosite)",
-    "epidote": r"^(epidote|clinozo|zoisite)",
-    "pyrophyllite": r"^pyroph",
-    "gypsum": r"^gyps",
-}
-_COMPILED = {g: re.compile(p, re.IGNORECASE) for g, p in COARSE_GROUPS.items()}
+from specret.taxonomy import load_taxonomy
 
 
 def coarse_group(name: str | None) -> str:
-    """Coarse group of a USGS-style material name such as 'Calcite+.33Muscov AMX5'."""
-    if not name:
-        return "other"
-    first = str(name).strip()
-    for g, rx in _COMPILED.items():
-        if rx.match(first):
-            return g
-    return "other"
+    """Taxonomy group of a USGS-style name such as 'Calcite+.33Muscov AMX5'."""
+    return load_taxonomy().group_of(name)
+
+
+def coarse_class(name: str | None) -> str:
+    return load_taxonomy().classify(name)[1]
 
 
 @dataclass
@@ -112,13 +93,16 @@ def compare_group2(
                 "l2b_group": coarse_group(ref_name),
                 "l2b_depth": float(l2b.group2_depth[r, c]),
                 "top1_name": top.get("material_name"),
-                "top1_group": coarse_group(top.get("material_name")),
+                "top1_group": top.get("group") or coarse_group(top.get("material_name")),
+                "l2b_class": coarse_class(ref_name),
+                "top1_class": top.get("material_class") or coarse_class(top.get("material_name")),
                 "top1_sam_deg": top.get("sam_deg", np.nan),
-                "topk_groups": [coarse_group(x["material_name"]) for x in m],
+                "topk_groups": [x.get("group") or coarse_group(x["material_name"]) for x in m],
             }
         )
     df = pd.DataFrame(records)
     df["top1_agree"] = df["top1_group"] == df["l2b_group"]
+    df["top1_class_agree"] = df["top1_class"] == df["l2b_class"]
     df["topk_agree"] = [g in ks for g, ks in zip(df["l2b_group"], df["topk_groups"], strict=True)]
     return df
 
@@ -130,6 +114,7 @@ def summarize(df: pd.DataFrame, min_pixels: int = 50) -> pd.DataFrame:
         {
             "pixels": g.size(),
             "top1_agree": g["top1_agree"].mean(),
+            "top1_class_agree": g["top1_class_agree"].mean(),
             "topk_agree": g["topk_agree"].mean(),
             "median_sam_deg": g["top1_sam_deg"].median(),
             "most_common_top1": g["top1_group"].agg(lambda s: s.value_counts().index[0]),

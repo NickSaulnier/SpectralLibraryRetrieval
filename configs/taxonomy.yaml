@@ -1,0 +1,196 @@
+# Material taxonomy: material name -> group -> class.
+#
+# Library names follow USGS conventions: mixtures list the dominant mineral first
+# ("Calcite+.33Muscov", "Chlor.6+Epid.2+Calc.2"), so a name is classified by the first
+# pattern that matches its start (case-insensitive). Groups are tried in file order;
+# put narrower patterns (e.g. chlorapatite) before broader ones (chlor).
+#
+# Group names are the unit of "right mineral family" in metrics. The plan's hard pairs
+# (kaolinite/dickite, K/Na-alunite, muscovite/illite, calcite/dolomite,
+# hematite/goethite) are separated at the exact-mineral level, and also at group level for
+# calcite/dolomite and hematite/goethite.
+#
+# Chapters A, O, V and L (artificial, organic, vegetation, liquid) are classified by
+# chapter, not by name. Each decision below is a judgement call; comment changes.
+
+chapter_groups:
+  A: {group: artificial, class: artificial}
+  O: {group: organic, class: organic}
+  V: {group: vegetation, class: vegetation}
+  L: {group: liquid, class: liquid}
+
+groups:
+  # --- phosphates first: "chlorapatite" must not fall into chlorite ---
+  phosphate:
+    class: phosphate
+    patterns: [chlorapatite, fluorapatite, hydroxyl-apatite, apatite, monazite, xenotime, pyromorphite]
+
+  # --- sulfates ---
+  alunite:
+    class: sulfate
+    patterns: [alun, kalun]
+  jarosite:
+    class: sulfate
+    patterns: [jaros, jaro\b, ammonio-jarosite]
+  fe_sulfate:
+    class: sulfate
+    patterns: [copiapite, coquimbite, butlerite, schwertmannite, szomolnokite]
+  ca_sulfate:
+    class: sulfate
+    patterns: [gyp, bassanite, anhydrite]
+  other_sulfate:
+    class: sulfate
+    patterns: [barite, celestite, kieserite, epsomite, bloedite, mirabilite, thenardite,
+               polyhalite, syngenite, kainite, mascagnite, eugsterite]
+
+  # --- phyllosilicates ---
+  kaolin:
+    # Kaolin/smectite interstratified clays are grouped with kaolin; EMIT L2B does the same.
+    class: phyllosilicate
+    patterns: [kaol, dickite, dic\., halloysite, nacrite, endellite]
+  white_mica:
+    class: phyllosilicate
+    patterns: [muscov, illite, ammonio-illite, paragonite, sericite, phengite, margarite,
+               lepidolite, roscoelite]
+  dark_mica:
+    class: phyllosilicate
+    patterns: [biotite, phlogopite, annite, siderophyllite, clintonite, glauconite]
+  smectite:
+    # Rectorite (illite/smectite) and vermiculite are expandable clays; grouped here.
+    class: phyllosilicate
+    patterns: [montmor, beidellite, nontronite, saponite, hectorite, sauconite,
+               ammonio-smectite, rectorite, vermiculite]
+  chlorite:
+    # Corrensite (chlorite/smectite) and cookeite (Li-chlorite) grouped with chlorite.
+    class: phyllosilicate
+    patterns: [chlorite, chlorit\., "chlor[.+]", chl\., clinochl, prochlorite, thuringite, cookeite,
+               corrensite, chamosite]
+  serpentine:
+    class: phyllosilicate
+    patterns: [antigorite, chrysotile, lizardite, serpentine, cronstedtite]
+  talc_pyrophyllite:
+    class: phyllosilicate
+    patterns: [talc, pyrophyl]
+  palygorskite_sepiolite:
+    class: phyllosilicate
+    patterns: [palygorskite, sepiolite]
+
+  # --- carbonates (calcite and dolomite kept apart: a plan hard pair) ---
+  calcite:
+    # Aragonite is the CaCO3 polymorph; limestone is calcite-dominated rock.
+    class: carbonate
+    patterns: [calc, aragonite, limestone]
+  dolomite:
+    class: carbonate
+    patterns: [dolo]
+  other_carbonate:
+    class: carbonate
+    patterns: [magnesite, siderite, rhodochrosite, strontianite, witherite, ankerite, azurite,
+               malachite, gaylussite, trona, "sodium[ _]bicarbonate", ancylite, bastnaesite,
+               parisite]
+
+  # --- ammonium feldspar ---
+  buddingtonite:
+    class: feldspar
+    patterns: [budd]
+
+  # --- silica ---
+  silica:
+    class: silica
+    patterns: [chalcedony, opal, chert, quartz, hyalite]
+
+  # --- Fe oxides (hematite and goethite kept apart: a plan hard pair) ---
+  hematite:
+    class: fe_oxide
+    patterns: [hematit, nanohematite, nhematit, maghemite]
+  goethite:
+    class: fe_oxide
+    patterns: [goeth, lepidocrocite, lepidocrosite, limonite, pitch_limonite, ferrihydrite, fe-hydroxide]
+
+  # --- other oxides and hydroxides ---
+  al_hydroxide:
+    class: oxide
+    patterns: [gibbsite, diaspore]
+  other_oxide:
+    class: oxide
+    patterns: [magnetite, ilmenite, chromite, rutile, brookite, cassiterite, corundum, cuprite,
+               psilomelane, pyrolusite, zincite, brucite, portlandite, spinel,
+               neodymium_oxide, samarium_oxide]
+
+  # --- chain silicates ---
+  amphibole:
+    class: inosilicate
+    patterns: [actinolite, tremolite, hornblende, richterite, riebeckite, glaucophane,
+               anthophyllite, cummingtonite, nephrite, smaragdite, uralite, amphibole]
+  pyroxene:
+    # Includes the pyroxenoids (wollastonite, pectolite, rhodonite, pyroxmangite).
+    class: inosilicate
+    patterns: [acmite, augite, diopside, hedenbergite, enstatite, bronzite, hypersthene,
+               pigeonite, jadeite, fassaite, pyroxene, spodumene, wollastonite, pectolite,
+               rhodonite, pyroxmangite]
+
+  # --- framework silicates ---
+  feldspar:
+    class: tectosilicate
+    patterns: [albite, andesine, anorthite, bytownite, labradorite, oligoclase, microcline,
+               orthoclase, sanidine, adularia, perthite]
+  scapolite:
+    class: tectosilicate
+    patterns: [dipyre, marialite, meionite, mizzonite]
+  zeolite:
+    class: tectosilicate
+    patterns: [analcime, clinoptilolite, heulandite, laumontite, mordenite, natrolite,
+               scolecite, stilbite, chabazite, erionite, mesolite]
+  feldspathoid:
+    class: tectosilicate
+    patterns: [nepheline, lazurite]
+
+  # --- ortho- and sorosilicates ---
+  garnet:
+    class: nesosilicate
+    patterns: [almandine, andradite, grossular, hydrogrossular, spessartine, uvarovite]
+  olivine:
+    class: nesosilicate
+    patterns: [olivine, forsterite, knebelite, monticellite]
+  epidote:
+    class: sorosilicate
+    patterns: [epidote, epid, clinozoisite, zoisite, allanite]
+  other_silicate:
+    # Zunyite is diagnostic in the SWIR (Al-OH) but rare; kept here until it needs its own group.
+    class: other_silicate
+    patterns: [andalusite, axinite, beryl, datolite, dumortierite, elbaite, tourmaline,
+               staurolite, sphene, topaz, zircon, zunyite, cordierite, vesuvianite, prehnite,
+               chrysocolla]
+
+  # --- non-silicates ---
+  sulfide:
+    class: sulfide
+    patterns: [arsenopyrite, chalcopyrite, cinnabar, galena, pyrite, pyrrhotite, sphalerite,
+               covellite]
+  borate:
+    class: borate
+    patterns: [colemanite, howlite, pinnoite, tincalconite, ulexite, teepleite, rivadavite]
+  halide:
+    class: halide
+    patterns: [halite, carnallite]
+  nitrate:
+    class: nitrate
+    patterns: [niter, "sodium[ _]nitrate", potassium nitrate, perchlorate]
+  native_element:
+    class: other
+    patterns: [sulfur, carbon_black, karpatite]
+
+  # --- rocks, soils and surfaces (chapters S and C) ---
+  rock_soil:
+    class: rock_soil
+    patterns: [basalt, sand, stonewall_playa, desert_varnish, burnarea, white_crust,
+               hydrated_volc, acid_mine, blck_mn, blue_efflor, magnetite_skarn, hybasaltglass]
+
+  # --- name-based fallbacks for spectra without a chapter (e.g. EMIT L2B mineral names) ---
+  vegetation:
+    class: vegetation
+    patterns: [grass, dry_long_grass]
+  artificial:
+    class: artificial
+    patterns: [plastic, plywood, fiberglass, polystyrene, painted, wtc_, coated_steel, cyanide,
+               green_slime, renyolds]

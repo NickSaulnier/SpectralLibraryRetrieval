@@ -1,0 +1,19 @@
+# Frozen evaluation split (PLAN.md, Phase 2a). Generated once with `specret make-splits`
+# and committed as configs/splits/<version>.csv. Never regenerate a version: bump it.
+
+version: splits_v1
+seed: 20261031
+
+# Only physical materials take part; artificial, organic, vegetation and liquid spectra are
+# always in the production library but not in the benchmark.
+chapters: [M, S, C]
+measurements: [AREF, RREF]
+
+# Fractions of *samples* (not spectra) per group. Groups with fewer than `min_samples`
+# samples go entirely to train.
+fractions: {train: 0.70, val: 0.15, test: 0.15}
+min_samples: 4
+
+# Whole groups held out for open-set (unknown material) evaluation. Chosen to be spectrally
+# distinct, reasonably sized, and not among the Cuprite target groups.
+openset_groups: [zeolite, borate, serpentine, scapolite, other_sulfate]

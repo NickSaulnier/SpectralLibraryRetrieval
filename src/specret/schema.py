@@ -72,8 +72,15 @@ def records_to_frame(records: list[SpectrumRecord]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def write_library(records: list[SpectrumRecord], path: str | Path) -> pd.DataFrame:
+def write_library(
+    records: list[SpectrumRecord], path: str | Path, classify: bool = False
+) -> pd.DataFrame:
+    """Write the canonical parquet. `classify` fills group/material_class from the taxonomy."""
     df = records_to_frame(records)
+    if classify:
+        from specret.taxonomy import apply_taxonomy
+
+        df = apply_taxonomy(df)
     if df["spectrum_id"].duplicated().any():
         dupes = df.loc[df["spectrum_id"].duplicated(), "spectrum_id"].tolist()[:5]
         raise ValueError(f"duplicate spectrum_id values, e.g. {dupes}")

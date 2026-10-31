@@ -8,11 +8,20 @@ import pandas as pd
 from specret.preprocess.normalize import sam_degrees
 from specret.preprocess.splice import splice_correct
 from specret.search.gpu_exact import ExactIndex
-from specret.search.vectors import library_vectors, masked_unit, query_vectors, vector_masks
+from specret.search.vectors import query_vectors, represent, vector_masks
 from specret.sensors.library import SensorLibrary
 from specret.sensors.resample import resample
 
-RESULT_FIELDS = ("material_name", "mineral", "chapter", "source", "instrument", "sample_id")
+RESULT_FIELDS = (
+    "material_name",
+    "mineral",
+    "group",
+    "material_class",
+    "chapter",
+    "source",
+    "instrument",
+    "sample_id",
+)
 MIN_QUERY_BANDS = 20  # below this a partial-coverage query is not attempted
 
 
@@ -23,13 +32,19 @@ class Retriever:
         canonical: pd.DataFrame,
         vector: str = "sam",
         device: str | None = None,
+        chapters: tuple[str, ...] | None = None,
     ):
+        """`chapters` restricts the searchable library, e.g. ("M", "S", "C") for minerals,
+        mixtures and coatings only."""
+        self.meta = canonical.set_index("spectrum_id")
+        if chapters is not None:
+            keep = self.meta.loc[lib.spectrum_ids, "chapter"].isin(chapters).to_numpy()
+            lib = SensorLibrary(lib.sensor, lib.spectrum_ids[keep], lib.matrix[keep])
         self.lib = lib
         self.vector = vector
         self.mask = vector_masks(lib)[vector]
-        vecs, ok = library_vectors(lib)[vector]
+        vecs, ok = represent(lib.matrix, lib.sensor.centers_nm, self.mask, vector)
         self.index = ExactIndex(vecs[ok], lib.spectrum_ids[ok], device=device)
-        self.meta = canonical.set_index("spectrum_id")
 
     def check_bands(self, centers_nm: np.ndarray) -> None:
         c = self.lib.sensor.centers_nm
@@ -54,8 +69,9 @@ class Retriever:
         mask = self.mask & np.isfinite(spectrum)
         if mask.sum() < MIN_QUERY_BANDS:
             return []
-        q, q_ok = masked_unit(spectrum, mask)
-        lib, lib_ok = masked_unit(self.lib.matrix, mask)
+        c = self.lib.sensor.centers_nm
+        q, q_ok = represent(spectrum, c, mask, self.vector)
+        lib, lib_ok = represent(self.lib.matrix, c, mask, self.vector)
         if not (q_ok[0] and lib_ok.any()):
             return []
         sim = lib[lib_ok] @ q[0]
@@ -67,17 +83,19 @@ class Retriever:
         """Top-k matches for each spectrum (rows on the library's sensor bands).
 
         Queries missing some good bands fall back to a search restricted to the bands they
-        have. A query with fewer than MIN_QUERY_BANDS usable bands returns no matches.
+        have. A query with fewer than MIN_QUERY_BANDS usable bands returns no matches, and so
+        does a featureless query in a continuum-removed representation.
         """
         spectra = np.atleast_2d(spectra)
-        qv, ok = query_vectors(self.lib, spectra)[self.vector]
+        qv, ok = query_vectors(self.lib, spectra, kinds=(self.vector,))[self.vector]
         out: list[list[dict]] = [[] for _ in range(len(spectra))]
         if ok.any():
             scores, idx = self.index.search(qv[ok], k)
             ids = self.index.ids
             for qi, s_row, i_row in zip(np.flatnonzero(ok), scores, idx, strict=True):
                 out[qi] = [self._match(str(ids[i]), s) for s, i in zip(s_row, i_row, strict=True)]
-        for qi in np.flatnonzero(~ok):
+        missing = ~np.isfinite(spectra[:, self.mask]).all(axis=1)
+        for qi in np.flatnonzero(~ok & missing):
             out[qi] = self._partial_query(spectra[qi], k)
         return out
 

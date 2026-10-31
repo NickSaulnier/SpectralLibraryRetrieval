@@ -41,7 +41,10 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         recs = load_ecostress_dir(d)
         print(f"{d}: {len(recs)} spectra")
         records.extend(recs)
-    df = write_library(records, args.out)
+    df = write_library(records, args.out, classify=True)
+    unclassified = int((df["group"] == "unclassified").sum())
+    if unclassified:
+        print(f"warning: {unclassified} spectra match no group in configs/taxonomy.yaml")
     flagged = df["purity_flag"].notna().sum()
     print(f"wrote {len(df)} spectra to {args.out} ({flagged} flagged by the scale check)")
 
@@ -144,17 +147,37 @@ def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     canonical = read_library(args.library)
     bbox = tuple(args.bbox) if args.bbox else CUPRITE_BBOX
     for vector in args.vectors:
-        r = Retriever(lib, canonical, vector=vector)
+        chapters = tuple(args.chapters) if args.chapters else None
+        r = Retriever(lib, canonical, vector=vector, chapters=chapters)
         r.check_bands(np.asarray(scene.centers_nm))
         df = compare_group2(scene, l2b, r, bbox, min_depth=args.min_depth, k=args.k)
         print(
             f"\n=== vector {vector}: {len(df)} pixels, top-1 group agreement "
-            f"{df['top1_agree'].mean():.1%}, top-{args.k} {df['topk_agree'].mean():.1%}"
+            f"{df['top1_agree'].mean():.1%}, top-{args.k} {df['topk_agree'].mean():.1%}, "
+            f"top-1 class agreement {df['top1_class_agree'].mean():.1%}"
         )
         print(summarize(df).round(3).to_string())
         if args.out:
             Path(args.out).mkdir(parents=True, exist_ok=True)
-            df.to_parquet(Path(args.out) / f"l2bmin_compare_{vector}.parquet")
+            suffix = "_" + "".join(args.chapters) if args.chapters else ""
+            df.to_parquet(Path(args.out) / f"l2bmin_compare_{vector}{suffix}.parquet")
+
+
+def cmd_make_splits(args: argparse.Namespace) -> None:
+    from specret.eval.splits import load_split_config, make_splits, write_splits
+    from specret.schema import read_library
+
+    cfg = load_split_config()
+    df = read_library(args.library)
+    if df["group"].isna().all():
+        raise SystemExit("library has no groups: re-run `specret ingest`")
+    splits = make_splits(df, cfg)
+    path = write_splits(splits, cfg["version"], force=args.force)
+    counts = splits.groupby("split").agg(
+        spectra=("spectrum_id", "size"), samples=("sample_id", "nunique")
+    )
+    print(counts.to_string())
+    print(f"wrote {path}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -206,7 +229,7 @@ def main(argv: list[str] | None = None) -> None:
     q = sub.add_parser("query", help="identify a field spectrum or a scene pixel")
     q.add_argument("library_npz")
     q.add_argument("--library", default=str(DEFAULT_CANONICAL))
-    q.add_argument("--vector", default="sam", choices=["sam", "swir2"])
+    q.add_argument("--vector", default="sam", choices=["sam", "swir2", "cr", "cr_swir2"])
     q.add_argument("-k", type=int, default=5)
     q.add_argument("--field", help=".asd or CSV file")
     q.add_argument("--emit", help="EMIT L2A granule")
@@ -217,6 +240,11 @@ def main(argv: list[str] | None = None) -> None:
     q.add_argument("--lon", type=float)
     q.set_defaults(func=cmd_query)
 
+    s = sub.add_parser("make-splits", help="create the frozen sample-level split (once)")
+    s.add_argument("--library", default=str(DEFAULT_CANONICAL))
+    s.add_argument("--force", action="store_true", help="overwrite an existing version")
+    s.set_defaults(func=cmd_make_splits)
+
     c = sub.add_parser("compare-l2bmin", help="agreement with the EMIT L2B mineral map")
     c.add_argument("library_npz", help="library resampled to this scene's EMIT bands")
     c.add_argument("--rfl", required=True, help="EMIT L2A RFL granule")
@@ -224,8 +252,9 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--library", default=str(DEFAULT_CANONICAL))
     c.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"))
     c.add_argument("--min-depth", type=float, default=0.05)
-    c.add_argument("--vectors", nargs="+", default=["sam", "swir2"])
+    c.add_argument("--vectors", nargs="+", default=["sam", "swir2", "cr", "cr_swir2"])
     c.add_argument("-k", type=int, default=5)
+    c.add_argument("--chapters", nargs="+", help="restrict the library, e.g. M S C")
     c.add_argument("--out", help="folder for per-pixel results (parquet)")
     c.set_defaults(func=cmd_compare_l2bmin)
 
