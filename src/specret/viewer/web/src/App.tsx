@@ -1,16 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "./api/client";
+import { api, type Polygon } from "./api/client";
 import type { Identification, PlumeRow } from "./api/types";
 import { parseLatLon } from "./lib";
 import { LayerPanel } from "./map/LayerPanel";
 import { mergeLayers, moveLayer, type LayerState } from "./map/layerState";
-import { MapView, type Bounds } from "./map/MapView";
+import { MapView, type Bounds, type DrawMode } from "./map/MapView";
+import { AreaPanel } from "./panels/AreaPanel";
 import { PixelPanel } from "./panels/PixelPanel";
 import { PlumesPanel } from "./panels/PlumesPanel";
 
-type Tab = "layers" | "pixel" | "plumes";
+type Tab = "layers" | "pixel" | "plumes" | "area";
 
 export function App() {
   const qc = useQueryClient();
@@ -27,6 +28,9 @@ export function App() {
   const [basemap, setBasemap] = useState(false);
   const [fitTo, setFitTo] = useState<{ bounds: Bounds; seq: number } | null>(null);
   const [latlon, setLatlon] = useState("");
+  const [drawMode, setDrawMode] = useState<DrawMode>(null);
+  const [selection, setSelection] = useState<Polygon | null>(null);
+  const [compareId, setCompareId] = useState<string | null>(null);
 
   const list = scenes.data ?? [];
   const scene = list.find((s) => s.key === key) ?? null;
@@ -51,6 +55,9 @@ export function App() {
     if (scene?.bounds) setFitTo({ bounds: scene.bounds as Bounds, seq: Date.now() });
     setPoint(null);
     setPlume(null);
+    setSelection(null);
+    setDrawMode(null);
+    setCompareId(null);
     setResult(null);
     setStatus("No pixel selected.");
   }, [scene?.key]);
@@ -155,6 +162,14 @@ export function App() {
           point={point}
           basemap={basemap}
           fitTo={fitTo}
+          drawMode={drawMode}
+          selection={selection}
+          compare={layers.find((l) => l.id === compareId) ?? null}
+          onSelection={(poly) => {
+            setSelection(poly);
+            setDrawMode(null);
+            setTab("area");
+          }}
           onPoint={identify}
           onPlume={(id) => {
             setPlume(id);
@@ -168,15 +183,18 @@ export function App() {
         />
         <aside className="sidebar">
           <nav className="tabs" role="tablist">
-            {(["layers", "pixel", "plumes"] as Tab[]).map((t) => (
+            {(["layers", "pixel", "plumes", "area"] as Tab[]).map((t) => (
               <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-                {t === "layers" ? "Layers" : t === "pixel" ? "Pixel" : "Plumes"}
+                {{ layers: "Layers", pixel: "Pixel", plumes: "Plumes", area: "Area" }[t]}
               </button>
             ))}
           </nav>
           <div className="tab-body">
             {tab === "layers" && (
               <LayerPanel
+                sceneKey={key}
+                compareId={compareId}
+                onCompare={setCompareId}
                 layers={layers}
                 onChange={(id, patch) => setLayers((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))}
                 onMove={(id, dir) => setLayers((ls) => moveLayer(ls, id, dir))}
@@ -197,6 +215,20 @@ export function App() {
                 name={name}
                 onField={onField}
                 onMapped={refresh}
+              />
+            )}
+            {tab === "area" && (
+              <AreaPanel
+                sceneKey={key}
+                canUnmix={!!scene?.mapped}
+                drawMode={drawMode}
+                selection={selection}
+                onDraw={setDrawMode}
+                onClear={() => {
+                  setSelection(null);
+                  setDrawMode(null);
+                }}
+                onUnmixed={refresh}
               />
             )}
             {tab === "plumes" && (

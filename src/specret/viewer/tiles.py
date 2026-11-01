@@ -29,11 +29,79 @@ def empty_tile() -> bytes:
 EMPTY = empty_tile()
 
 
+UNSELECTED = (40, 40, 40, 140)  # categories filtered out: dimmed, still showing the scene
+LOW_CONFIDENCE = (205, 205, 205, 255)  # below the confidence threshold
+LOW_CODE = 255
+
+
 def render(
     path: Path, kind: str, z: int, x: int, y: int, rescale=(0.0, 1.0), colormap="viridis"
 ) -> bytes:
     """PNG bytes of one tile; a transparent tile outside the layer."""
     return _render(str(path), path.stat().st_mtime_ns, kind, z, x, y, tuple(rescale), colormap)
+
+
+def render_categories(
+    path: Path,
+    z: int,
+    x: int,
+    y: int,
+    keep: tuple[int, ...] | None = None,
+    confidence: Path | None = None,
+    min_p: float = 0.0,
+) -> bytes:
+    """A categorical tile where only `keep` codes keep their colour (the rest dimmed) and, with
+    a confidence raster on the same grid, pixels below `min_p` drawn as LOW_CONFIDENCE."""
+    conf = (str(confidence), confidence.stat().st_mtime_ns) if confidence and min_p > 0 else None
+    return _render_categories(str(path), path.stat().st_mtime_ns, z, x, y, keep, conf, min_p)
+
+
+@lru_cache(maxsize=4096)
+def _render_categories(path, mtime, z, x, y, keep, conf, min_p) -> bytes:
+    from rio_tiler.errors import TileOutsideBounds
+    from rio_tiler.io import Reader
+
+    with Reader(path) as src:
+        if not src.tile_exists(x, y, z):
+            return EMPTY
+        try:
+            img = src.tile(x, y, z, tilesize=TILE, indexes=1, resampling_method="nearest")
+        except TileOutsideBounds:
+            return EMPTY
+        colors = dict(src.colormap or {})
+    codes = img.array[0].filled(0).astype(np.int64)
+    if keep is not None:
+        for c in list(colors):
+            if c and c not in keep:
+                colors[c] = UNSELECTED
+    if conf is not None:
+        with Reader(conf[0]) as csrc:
+            p = csrc.tile(x, y, z, tilesize=TILE, indexes=1, resampling_method="nearest")
+        low = np.ma.filled(p.array[0].astype(np.float64), np.nan) < min_p
+        codes = np.where(low & (codes > 0), LOW_CODE, codes)
+        colors[LOW_CODE] = LOW_CONFIDENCE
+    img.array = np.ma.MaskedArray(codes.astype(np.uint8)[None], mask=img.array.mask)
+    return img.render(img_format="PNG", colormap=colors)
+
+
+def category_fractions(path: Path) -> dict[int, float]:
+    """Share of the valid pixels in each code of a categorical raster (read once, cached)."""
+    return dict(_fractions(str(path), path.stat().st_mtime_ns))
+
+
+@lru_cache(maxsize=64)
+def _fractions(path: str, mtime: int) -> tuple:
+    import rasterio
+
+    with rasterio.open(path) as ds:
+        a = ds.read(1)
+        nodata = ds.nodata
+    v = a[a != nodata] if nodata is not None else a.ravel()
+    v = v[v > 0]
+    if not v.size:
+        return ()
+    codes, counts = np.unique(v, return_counts=True)
+    return tuple((int(c), float(n / v.size)) for c, n in zip(codes, counts, strict=True))
 
 
 @lru_cache(maxsize=4096)

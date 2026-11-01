@@ -169,6 +169,21 @@ src/specret/viewer/
 
 ### Phase V2: Mineral exploration (1–2 weeks)
 
+**Status (2026-11-01): done, with one change of plan.**
+- **Unmixing runs per area, not per scene.** It costs 12.8 ms per EMIT pixel, about 5.7 hours for a whole scene. So instead of `map-scene --unmix`, a drawn area is unmixed on demand as a background job (`viewer/unmix_area.py`, `POST /api/geo/{key}/unmix`).
+  - It is capped at 3,000 pixels; larger areas use a regular grid of every *n*th row and column, and each layer notes the grid.
+  - The fraction layers per endmember group (those averaging at least 2%) and the fit-residual layer appear under "Unmixing".
+  - Example: 2,873 pixels of a 296 km² Cuprite box in about 40 s.
+- **Group filter and confidence mask:** rendered server-side in the tile (`?groups=…&min_p=…`). Unselected groups are dimmed; pixels below P(group correct) are light grey. Legends list only the groups present, with their pixel share.
+- **Box and polygon drawing → Area tab:**
+  - **Contents:** area in km²; the mineral composition from the swath scene map, identical to the MCP `scene_summary` tool (Cuprite box: 23,631 px, the same fractions to 4 decimals); per-layer median, 5–95% range and histogram; plumes whose source lies inside.
+  - **Exports and actions:** GeoJSON and CSV export, and "Unmix this area".
+- **Agreement with EMIT L2B MIN:** an agreement layer (agree, disagree, no reference where L2B band depth < 0.05) with statistics and the top confusions, plus a swipe compare between any layer and the map.
+  - Mountain Pass: 39.0% group agreement over 1.04 M pixels, against Phase 5b's 39.8% (a 20,000-pixel sample with a library without vegetation). Cuprite: 48.6%.
+  - The largest confusion, our "vegetation" against L2B calcite, comes from the vegetation chapter in the viewer's library.
+- **Checked in the browser:** the filter, mask, box and polygon drawing, the summary, the unmix job, the agreement statistics and swipe.
+- **Tests:** 4 new pytest tests (filters, area, agreement, summary endpoint) and 13 Vitest tests.
+
 - **Group filter:** show only chosen groups (for example carbonates or kaolin), with the rest greyed.
 - **Confidence mask:** a slider hides pixels below a chosen calibrated probability; the "likely unknown" class gets its own colour.
 - **Unmixing layers:** `map-scene --unmix` (new) stores the top endmembers and fractions per pixel, as `unmix.npz` plus COG layers. The viewer shows fraction maps per endmember group, plus the fit residual.

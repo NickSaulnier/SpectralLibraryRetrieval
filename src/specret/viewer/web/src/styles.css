@@ -109,3 +109,27 @@ header .basemap { display: inline-flex; gap: 6px; align-items: center; margin-le
 .ramp-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 table.values td { padding: 3px 4px; }
 .maplibregl-ctrl-attrib { font-size: 10px; }
+
+/* --- Phase V2: filters, area tools, swipe compare --- */
+.map-wrap { position: relative; width: 100%; height: 100%; min-height: 320px; }
+.map.compare { position: absolute; inset: 0; pointer-events: none; }
+.swipe { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; background: #ffd166;
+         cursor: ew-resize; touch-action: none; z-index: 2; }
+.swipe::after { content: "⇆"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                background: #ffd166; color: #000; border-radius: 99px; padding: 2px 6px; font-size: 12px; }
+.swipe-label { position: absolute; top: 8px; white-space: nowrap; font-size: 11px; background: rgba(0,0,0,.6);
+               color: #fff; padding: 1px 6px; border-radius: 4px; }
+.swipe-label.left { right: 10px; } .swipe-label.right { left: 10px; }
+.layer-row button.on { background: #ffd166; border-color: #ffd166; color: #000; }
+.legend.chips button { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 1px 6px;
+                       border-radius: 99px; background: transparent; color: var(--ink); }
+.legend.chips button.off { opacity: .4; text-decoration: line-through; }
+.legend.chips .frac { color: var(--muted); }
+.chips-head { display: flex; gap: 4px; align-items: baseline; }
+button.link { border: 0; padding: 0; background: none; color: var(--accent); text-decoration: underline; }
+.area h3 { font-size: 13px; margin: 8px 0 4px; }
+.bars { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.bar-row { display: grid; grid-template-columns: 110px 1fr 48px; gap: 6px; align-items: center; font-size: 12px; }
+.bar-row .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.bar-row .bar i { display: block; height: 100%; background: var(--accent); }
+.spark { width: 80px; height: 16px; fill: var(--accent); }

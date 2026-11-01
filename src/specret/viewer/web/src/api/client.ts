@@ -12,6 +12,16 @@ import type {
 type Path = keyof paths;
 export type GeoScene = components["schemas"]["GeoScene"];
 export type LayerInfo = components["schemas"]["LayerInfo"];
+export type AreaSummary = components["schemas"]["AreaSummary"];
+export type Polygon = [number, number][]; // [lon, lat] vertices, open ring
+
+export interface Agreement {
+  pixels_mapped: number;
+  pixels_with_reference: number;
+  agreement: number;
+  depth_min: number;
+  top_confusions: { ours: string; l2bmin: string; pixels: number }[];
+}
 
 /** Fill a typed route template ("/api/map/{scene_id}") with its parameters. */
 export function route<P extends Path>(path: P, params: Record<string, string | number> = {}): string {
@@ -74,12 +84,22 @@ export const api = {
   plumesGeojson: (key: string) =>
     json<GeoJSON.FeatureCollection>(route("/api/geo/{key}/plumes.geojson", { key })),
   colormaps: () => json<Record<string, string[]>>(route("/api/colormaps")),
-  /** MapLibre tile template for a layer, with its current stretch and colormap. */
-  tileUrl: (layerId: string, rescale: [number, number], colormap: string) =>
-    `${location.origin}/api/tiles/${encodeURIComponent(layerId)}/{z}/{x}/{y}.png?${query({
-      rescale: rescale.join(","),
-      colormap,
-    })}`,
+  /** MapLibre tile template for a layer, with its current stretch, colormap and filters. */
+  tileUrl: (layerId: string, q: Record<string, string | number | undefined>) =>
+    `${location.origin}/api/tiles/${encodeURIComponent(layerId)}/{z}/{x}/{y}.png?${query(q)}`,
+  summary: (key: string, polygon: Polygon, minP: number) =>
+    json<AreaSummary>(route("/api/geo/{key}/summary", { key }), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon, min_p: minP }),
+    }),
+  unmixArea: (key: string, polygon: Polygon, maxPixels = 3000) =>
+    json<{ job_id: string }>(route("/api/geo/{key}/unmix", { key }), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ polygon, max_pixels: maxPixels }),
+    }),
+  agreement: (key: string) => json<Agreement>(route("/api/geo/{key}/agreement", { key })),
   plume: (sceneId: string, plumeId: number) =>
     json<PlumeExplanation>(
       route("/api/gas/{scene_id}/plume/{plume_id}", { scene_id: sceneId, plume_id: plumeId }),

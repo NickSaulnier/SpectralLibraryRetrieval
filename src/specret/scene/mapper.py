@@ -172,18 +172,29 @@ def group_fractions(
     lon: np.ndarray | None = None,
     bbox: tuple[float, float, float, float] | None = None,
     min_p: float = 0.0,
+    polygon: list[tuple[float, float]] | None = None,
 ) -> pd.DataFrame:
-    """Share of mapped pixels per top-1 group, optionally inside a (W, S, E, N) box.
+    """Share of mapped pixels per top-1 group, optionally inside a (W, S, E, N) box or a
+    polygon of (lon, lat) vertices.
 
     Pixels whose calibrated P(correct) is below `min_p` count as "likely_unknown". Maps
     without a confidence layer fall back to the raw top-1 score.
     """
     sel = smap.valid.copy()
+    if polygon is not None:
+        xs, ys = zip(*polygon, strict=True)
+        bbox = (min(xs), min(ys), max(xs), max(ys))
     if bbox is not None:
         if lat is None or lon is None:
             raise ValueError("bbox needs the scene's lat/lon arrays")
         west, south, east, north = bbox
         sel &= (lon >= west) & (lon <= east) & (lat >= south) & (lat <= north)
+    if polygon is not None and sel.any():
+        from matplotlib.path import Path as MplPath
+
+        r, c = np.nonzero(sel)
+        inside = MplPath(polygon).contains_points(np.column_stack([lon[r, c], lat[r, c]]))
+        sel[r[~inside], c[~inside]] = False
     groups = smap.top1_group()[sel].astype(str)
     conf = smap.p_correct if smap.p_correct is not None else smap.scores[..., 0]
     c = conf[sel]

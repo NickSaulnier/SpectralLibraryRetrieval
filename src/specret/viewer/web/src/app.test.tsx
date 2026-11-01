@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { route } from "./api/client";
 import type { Identification } from "./api/types";
-import { initialLayers, mergeLayers, moveLayer } from "./map/layerState";
+import { initialLayers, mergeLayers, moveLayer, tileQuery } from "./map/layerState";
+import { selectionGeojson, summaryCsv } from "./panels/AreaPanel";
 import { fmt, parseLatLon, toCsv } from "./lib";
 import { PlumesPanel } from "./panels/PlumesPanel";
 import { matchesCsv, spectraCsv } from "./panels/ResultPanel";
@@ -71,6 +72,14 @@ describe("layer state", () => {
     expect(merged[1]).toMatchObject({ visible: true, opacity: 0.3, stretch: [1, 2] });
     expect(merged[0].legend).toHaveLength(1);
     expect(mergeLayers([{ ...layer("z"), scene: "T" }], user)[0].scene).toBe("T"); // new scene: reset
+  });
+
+  it("builds tile queries from the layer's settings", () => {
+    const [cat, cont] = initialLayers([layer("mineral_group", "categorical"), layer("ch4_enh")]);
+    expect(tileQuery(cat)).toEqual({ groups: undefined, min_p: undefined });
+    expect(tileQuery({ ...cat, keep: [3, 7], minP: 0.5 })).toEqual({ groups: "3,7", min_p: 0.5 });
+    expect(tileQuery({ ...cat, keep: [] })).toEqual({ groups: "", min_p: undefined });
+    expect(tileQuery({ ...cont, stretch: [0, 1500], cmap: "magma" })).toEqual({ rescale: "0,1500", colormap: "magma" });
   });
 
   it("reorders layers within bounds", () => {
@@ -140,5 +149,35 @@ describe("PlumesPanel", () => {
       </QueryClientProvider>,
     );
     expect(screen.getByRole("button", { name: "Detect plumes" })).toBeInTheDocument();
+  });
+});
+
+describe("area exports", () => {
+  const poly: [number, number][] = [[-117.25, 37.5], [-117.15, 37.5], [-117.15, 37.6], [-117.25, 37.6]];
+  const summary = {
+    area_km2: 98.0,
+    min_p: 0.3,
+    minerals: { pixels: 100, groups: [{ group: "white_mica", pixels: 60, fraction: 0.6, median_p: 0.7 }] },
+    layers: [{ id: "S.ch4_enh", title: "CH4 enhancement", units: "ppm·m", pixels: 90, mean: 1, median: 2,
+               p05: -5, p95: 9, hist_edges: [0, 1], hist_counts: [3] }],
+    plumes: { count: 1, by_gas: { CH4: { count: 1, total_q_kg_h: 500 } }, ids: [4] },
+  };
+
+  it("writes a closed GeoJSON polygon with the summary", () => {
+    const fc = JSON.parse(selectionGeojson(poly, summary));
+    const ring = fc.features[0].geometry.coordinates[0];
+    expect(ring).toHaveLength(5);
+    expect(ring[0]).toEqual(ring[4]);
+    expect(fc.features[0].properties.area_km2).toBe(98);
+  });
+
+  it("writes the summary as CSV", () => {
+    const lines = summaryCsv(summary).trim().split("\n");
+    expect(lines).toEqual([
+      "section,name,pixels,fraction_or_median,p05,p95,units",
+      "mineral,white_mica,60,0.6000,,,",
+      "layer,CH4 enhancement,90,2,-5,9,ppm·m",
+      "plumes,CH4,1,500,,,kg/h",
+    ]);
   });
 });

@@ -6,6 +6,16 @@ export interface LayerState extends LayerInfo {
   opacity: number;
   stretch: [number, number];
   cmap: string;
+  keep: number[] | null; // categorical: codes shown in colour (null = all)
+  minP: number; // mineral groups: hide pixels below this P(group correct)
+}
+
+/** Tile query for a layer's current settings. */
+export function tileQuery(l: LayerState): Record<string, string | number | undefined> {
+  if (l.kind === "categorical")
+    return { groups: l.keep ? l.keep.join(",") : undefined, min_p: l.minP > 0 ? l.minP : undefined };
+  if (l.kind === "continuous") return { rescale: l.stretch.join(","), colormap: l.cmap };
+  return {};
 }
 
 /** Which layers start visible for a newly opened scene: the true-colour context and the main
@@ -19,6 +29,8 @@ export function initialLayers(layers: LayerInfo[]): LayerState[] {
     opacity: l.name === "rgb" ? 1 : 0.8,
     stretch: [l.rescale[0], l.rescale[1]] as [number, number],
     cmap: l.colormap,
+    keep: null,
+    minP: 0,
   }));
 }
 
@@ -41,7 +53,9 @@ export function mergeLayers(fresh: LayerInfo[], current: LayerState[]): LayerSta
   return init
     .map((l) => {
       const c = byId.get(l.id);
-      return c ? { ...l, visible: c.visible, opacity: c.opacity, stretch: c.stretch, cmap: c.cmap } : l;
+      return c
+        ? { ...l, visible: c.visible, opacity: c.opacity, stretch: c.stretch, cmap: c.cmap, keep: c.keep, minP: c.minP }
+        : l;
     })
     .sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9));
 }

@@ -376,6 +376,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/geo/{key}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Geo Summary
+         * @description What is inside a polygon: mineral composition (the same computation as the MCP
+         *     scene_summary tool), statistics of every continuous layer, and plumes whose source
+         *     lies inside.
+         */
+        post: operations["geo_summary_api_geo__key__summary_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/geo/{key}/unmix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Geo Unmix
+         * @description Start unmixing an area's pixels in the background; poll /api/jobs/{job_id}. The
+         *     fraction layers appear in the scene's layer list when it is done.
+         */
+        post: operations["geo_unmix_api_geo__key__unmix_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/geo/{key}/agreement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geo Agreement
+         * @description Agreement of our mineral groups with EMIT L2B MIN (built on first request).
+         */
+        get: operations["geo_agreement_api_geo__key__agreement_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/colormaps": {
         parameters: {
             query?: never;
@@ -400,6 +463,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AreaRequest */
+        AreaRequest: {
+            /** Polygon */
+            polygon: number[][];
+            /**
+             * Min P
+             * @default 0.3
+             */
+            min_p: number;
+        };
+        /** AreaSummary */
+        AreaSummary: {
+            /** Area Km2 */
+            area_km2: number;
+            /** Min P */
+            min_p: number;
+            minerals: components["schemas"]["MineralSummary"] | null;
+            /** Layers */
+            layers: components["schemas"]["LayerStats"][];
+            plumes: components["schemas"]["PlumeSummary"];
+        };
         /** Body_field_api_field_post */
         Body_field_api_field_post: {
             /** File */
@@ -423,6 +507,17 @@ export interface components {
             mapped: boolean;
             /** Analyzed */
             analyzed: boolean;
+        };
+        /** GroupShare */
+        GroupShare: {
+            /** Group */
+            group: string;
+            /** Pixels */
+            pixels: number;
+            /** Fraction */
+            fraction: number;
+            /** Median P */
+            median_p: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -458,6 +553,29 @@ export interface components {
             /** Note */
             note: string;
         };
+        /** LayerStats */
+        LayerStats: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Units */
+            units: string;
+            /** Pixels */
+            pixels: number;
+            /** Mean */
+            mean: number | null;
+            /** Median */
+            median: number | null;
+            /** P05 */
+            p05: number | null;
+            /** P95 */
+            p95: number | null;
+            /** Hist Edges */
+            hist_edges: number[];
+            /** Hist Counts */
+            hist_counts: number[];
+        };
         /** LegendItem */
         LegendItem: {
             /** Code */
@@ -466,6 +584,38 @@ export interface components {
             label: string;
             /** Rgb */
             rgb: number[];
+            /** Fraction */
+            fraction?: number | null;
+        };
+        /** MineralSummary */
+        MineralSummary: {
+            /** Pixels */
+            pixels: number;
+            /** Groups */
+            groups: components["schemas"]["GroupShare"][];
+        };
+        /** PlumeSummary */
+        PlumeSummary: {
+            /** Count */
+            count: number;
+            /** By Gas */
+            by_gas: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** Ids */
+            ids: number[];
+        };
+        /** UnmixRequest */
+        UnmixRequest: {
+            /** Polygon */
+            polygon: number[][];
+            /**
+             * Max Pixels
+             * @default 3000
+             */
+            max_pixels: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -984,6 +1134,8 @@ export interface operations {
             query?: {
                 rescale?: string | null;
                 colormap?: string | null;
+                groups?: string | null;
+                min_p?: number;
             };
             header?: never;
             path: {
@@ -1053,6 +1205,111 @@ export interface operations {
         };
     };
     geo_plumes_api_geo__key__plumes_geojson_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_summary_api_geo__key__summary_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AreaRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_unmix_api_geo__key__unmix_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnmixRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_agreement_api_geo__key__agreement_get: {
         parameters: {
             query?: never;
             header?: never;

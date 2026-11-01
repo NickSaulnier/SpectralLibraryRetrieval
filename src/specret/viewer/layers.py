@@ -29,6 +29,8 @@ import numpy as np
 
 EMIT_ID = re.compile(r"(\d{8}T\d{6}_\d{7}_\d{3})")
 VIEWER_DIR = Path("outputs/viewer")
+UNMIX_MIN_MEAN = 0.02  # unmixing groups below this mean fraction in the area get no layer
+DEPTH_MIN = 0.05  # L2B MIN band depth below which a pixel has no reference mineral
 
 
 @dataclass
@@ -52,6 +54,14 @@ class Layer:
         d.pop("build")
         d["path"] = None
         d["ready"] = self.path is not None and self.path.exists()
+        if self.kind == "categorical" and d["ready"]:
+            from specret.viewer.tiles import category_fractions
+
+            frac = category_fractions(self.path)
+            d["legend"] = sorted(
+                ({**e, "fraction": frac.get(e["code"], 0.0)} for e in d["legend"]),
+                key=lambda e: -e["fraction"],
+            )
         d["buildable"] = self.build is not None
         d["rescale"] = list(self.rescale)
         return d
@@ -242,6 +252,37 @@ def scene_layers(ws, e: SceneEntry) -> list[Layer]:
                 rescale=(0.0, 1.0),
             )
 
+    unmix = cache / "unmix"
+    if (unmix / "meta.json").exists():
+        meta = json.loads((unmix / "meta.json").read_text(encoding="utf-8"))
+        note = f"{meta['pixels_unmixed']} pixels unmixed" + (
+            f", every {meta['step']}th row and column" if meta["step"] > 1 else ""
+        )
+        for g, f in meta["mean_fraction"].items():
+            if f < UNMIX_MIN_MEAN:
+                continue
+            add(
+                f"unmix_{g}",
+                f"Unmix: {g.replace('_', ' ')} fraction",
+                "Unmixing",
+                "continuous",
+                unmix / f"{g}.tif",
+                colormap="viridis",
+                rescale=(0.0, 1.0),
+                note=note,
+            )
+        add(
+            "unmix_residual",
+            "Unmix: fit residual (RMS)",
+            "Unmixing",
+            "continuous",
+            unmix / "residual.tif",
+            units="reflectance",
+            colormap="magma",
+            rescale=(0.0, 0.02),
+            note=note,
+        )
+
     for gas, (cmap, rng) in GAS_STYLE.items():
         for p in _emit_ghg(ws, key, gas):
             add(
@@ -279,6 +320,19 @@ def scene_layers(ws, e: SceneEntry) -> list[Layer]:
             legend=legend,
             build=lambda: build_l2bmin(l2bmin, _glt_source(ws, key), out),
         )
+        ours = ws.map_dir(e.mineral_scene) / "group.tif" if e.mineral_scene else None
+        if ours is not None and ours.exists():
+            add(
+                "agreement",
+                "Agreement with EMIT L2B MIN",
+                "Reference",
+                "categorical",
+                cache / "agreement.tif",
+                legend=AGREEMENT_LEGEND,
+                build=lambda: build_agreement(ours, l2bmin, _glt_source(ws, key), cache),
+                note=f"Our best-match group against L2B MIN's ~2 µm group, where its band "
+                f"depth is at least {DEPTH_MIN}",
+            )
     return layers
 
 
@@ -312,6 +366,12 @@ def _context_source(ws, e: SceneEntry):
 
 
 # --- builders (run once, cached) -----------------------------------------------------------
+
+AGREEMENT_LEGEND = [
+    {"code": 1, "label": "agree", "rgb": [63, 160, 90]},
+    {"code": 2, "label": "disagree", "rgb": [200, 70, 50]},
+    {"code": 3, "label": "no reference", "rgb": [150, 150, 150]},
+]
 
 _BUILD_LOCK = threading.Lock()
 RGB_NM = (650.0, 560.0, 470.0)
@@ -428,6 +488,70 @@ def build_l2bmin(path: Path, glt_source: Path | None, out: Path) -> Path:
         img = orthorectify(swath, glt_x, glt_y, 0).astype(np.uint8)
         colors = group_colors(codes)
         _write_cog(out, img, transform, crs, 0, colormap=colors)
+        depth = orthorectify(m.group2_depth.astype(np.float32), glt_x, glt_y, np.nan)
+        _write_cog(out.with_name("l2bmin_depth2.tif"), depth, transform, crs, np.nan)
         legend = [{"code": c, "label": g, "rgb": list(colors[c][:3])} for g, c in codes.items()]
         out.with_suffix(".json").write_text(json.dumps(legend), encoding="utf-8")
+        return out
+
+
+def _labels(path: Path) -> tuple[np.ndarray, dict[int, str]]:
+    """A categorical raster and its code -> label table (groups.csv or the legend json)."""
+    import pandas as pd
+    import rasterio
+
+    with rasterio.open(path) as ds:
+        a = ds.read(1)
+    csv, js = path.with_name("groups.csv"), path.with_suffix(".json")
+    if csv.exists():
+        t = pd.read_csv(csv)
+        return a, dict(zip(t["code"].astype(int), t["group"].astype(str), strict=True))
+    return a, {int(e["code"]): e["label"] for e in json.loads(js.read_text(encoding="utf-8"))}
+
+
+def build_agreement(ours: Path, l2bmin: Path, glt_source: Path | None, cache: Path) -> Path:
+    """Per-pixel agreement of our best-match group with L2B MIN's ~2 µm group, and its
+    statistics (agreement.json): pixels with a reference, agreement, top confusions."""
+    import pandas as pd
+    import rasterio
+
+    out = cache / "agreement.tif"
+    ref_path = cache / "l2bmin_group2.tif"
+    if not ref_path.with_name("l2bmin_depth2.tif").exists():
+        ref_path.unlink(missing_ok=True)  # an older build without depth
+    build_l2bmin(l2bmin, glt_source, ref_path)
+    with _BUILD_LOCK:
+        if out.exists():
+            return out
+        a, a_labels = _labels(ours)
+        b, b_labels = _labels(ref_path)
+        with rasterio.open(ref_path.with_name("l2bmin_depth2.tif")) as ds:
+            depth = ds.read(1)
+        with rasterio.open(ours) as ds:
+            transform, crs = ds.transform, ds.crs
+        if a.shape != b.shape:
+            raise ValueError(f"grids differ: ours {a.shape}, L2B MIN {b.shape}")
+        lut_a = np.array([a_labels.get(i, "") for i in range(256)], dtype=object)
+        lut_b = np.array([b_labels.get(i, "") for i in range(256)], dtype=object)
+        la, lb = lut_a[a], lut_b[b]
+        valid = a > 0
+        has_ref = valid & (b > 0) & (np.nan_to_num(depth) >= DEPTH_MIN)
+        code = np.zeros(a.shape, dtype=np.uint8)
+        code[valid] = 3
+        code[has_ref & (la == lb)] = 1
+        code[has_ref & (la != lb)] = 2
+        colors = {e["code"]: (*e["rgb"], 255) for e in AGREEMENT_LEGEND}
+        _write_cog(out, code, transform, crs, 0, colormap=colors)
+        dis = code == 2
+        pairs = pd.Series(list(zip(la[dis], lb[dis], strict=True))).value_counts()
+        stats = {
+            "pixels_mapped": int(valid.sum()),
+            "pixels_with_reference": int(has_ref.sum()),
+            "agreement": float((code == 1).sum() / max(int(has_ref.sum()), 1)),
+            "depth_min": DEPTH_MIN,
+            "top_confusions": [
+                {"ours": o, "l2bmin": t, "pixels": int(n)} for (o, t), n in pairs.head(10).items()
+            ],
+        }
+        out.with_suffix(".json").write_text(json.dumps(stats, indent=1), encoding="utf-8")
         return out

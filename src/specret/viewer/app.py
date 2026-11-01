@@ -381,6 +381,8 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         y: int,
         rescale: str | None = None,
         colormap: str | None = None,
+        groups: str | None = None,
+        min_p: float = 0.0,
     ) -> Response:
         """One 256 px Web Mercator tile. Layers built on first use (true colour, L2B MIN)
         are built by the first request, which takes a few seconds."""
@@ -392,6 +394,16 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
                 layer.build()
             except Exception as exc:  # reported to the map as a missing layer
                 raise HTTPException(500, f"could not build {layer_id}: {exc}") from None
+        if layer.kind == "categorical":
+            keep = None
+            if groups is not None:
+                try:
+                    keep = tuple(int(g) for g in groups.split(",") if g)
+                except ValueError:
+                    raise HTTPException(400, "groups is a comma-separated list of codes") from None
+            conf = layer.path.parent / "confidence.tif" if layer.name == "mineral_group" else None
+            png = tiles_mod.render_categories(layer.path, z, x, y, keep, conf, min_p)
+            return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=300"})
         rng = layer.rescale
         if rescale:
             try:
@@ -429,6 +441,57 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
             return {"type": "FeatureCollection", "features": []}
         return json.loads(path.read_text(encoding="utf-8"))
 
+    @app.post("/api/geo/{key}/summary")
+    def geo_summary(key: str, req: AreaRequest) -> AreaSummary:
+        """What is inside a polygon: mineral composition (the same computation as the MCP
+        scene_summary tool), statistics of every continuous layer, and plumes whose source
+        lies inside."""
+        from specret.viewer import area
+
+        e = entry(key)
+        if len(req.polygon) < 3:
+            raise HTTPException(400, "a polygon needs at least 3 vertices")
+        poly = [(float(x), float(y)) for x, y in req.polygon]
+        minerals = None
+        if e.mineral_scene and (ws.map_dir(e.mineral_scene) / "scene_map.npz").exists():
+            minerals = area.mineral_composition(ws, e.mineral_scene, poly, req.min_p)
+        layers = [
+            area.layer_stats(layer, poly)
+            for layer in layers_mod.scene_layers(ws, e)
+            if layer.kind == "continuous" and layer.path is not None and layer.path.exists()
+        ]
+        return AreaSummary(
+            area_km2=area.polygon_area_km2(poly),
+            min_p=req.min_p,
+            minerals=minerals,
+            layers=[s for s in layers if s is not None],
+            plumes=area.plumes_inside(e.gas_dir, poly),
+        )
+
+    @app.post("/api/geo/{key}/unmix")
+    def geo_unmix(key: str, req: UnmixRequest) -> dict[str, str]:
+        """Start unmixing an area's pixels in the background; poll /api/jobs/{job_id}. The
+        fraction layers appear in the scene's layer list when it is done."""
+        e = entry(key)
+        if not e.mineral_scene:
+            raise HTTPException(400, "this scene has no reflectance to unmix")
+        if len(req.polygon) < 3:
+            raise HTTPException(400, "a polygon needs at least 3 vertices")
+        poly = [(float(x), float(y)) for x, y in req.polygon]
+        return {"job_id": jobs.start_unmix_job(ws, key, e.mineral_scene, poly, req.max_pixels)}
+
+    @app.get("/api/geo/{key}/agreement")
+    def geo_agreement(key: str) -> dict:
+        """Agreement of our mineral groups with EMIT L2B MIN (built on first request)."""
+        layer = next(
+            (x for x in layers_mod.scene_layers(ws, entry(key)) if x.name == "agreement"), None
+        )
+        if layer is None:
+            raise HTTPException(404, "needs a mineral map and an EMIT L2B MIN granule")
+        if not layer.path.exists():
+            layer.build()
+        return json.loads(layer.path.with_suffix(".json").read_text(encoding="utf-8"))
+
     @app.get("/api/colormaps")
     def colormaps() -> dict[str, list[str]]:
         """Each colormap sampled at 11 stops, as hex colours, for legends."""
@@ -455,10 +518,60 @@ class GeoScene(BaseModel):
     analyzed: bool
 
 
+class AreaRequest(BaseModel):
+    polygon: list[list[float]]  # [[lon, lat], ...], not necessarily closed
+    min_p: float = 0.3  # below this P(group correct), pixels count as likely_unknown
+
+
+class UnmixRequest(BaseModel):
+    polygon: list[list[float]]
+    max_pixels: int = 3000  # about 40 s; larger areas are unmixed on a coarser grid
+
+
+class GroupShare(BaseModel):
+    group: str
+    pixels: int
+    fraction: float
+    median_p: float | None
+
+
+class MineralSummary(BaseModel):
+    pixels: int
+    groups: list[GroupShare]
+
+
+class LayerStats(BaseModel):
+    id: str
+    title: str
+    units: str
+    pixels: int
+    mean: float | None
+    median: float | None
+    p05: float | None
+    p95: float | None
+    hist_edges: list[float]
+    hist_counts: list[int]
+
+
+class PlumeSummary(BaseModel):
+    count: int
+    by_gas: dict[str, dict[str, float]]  # gas -> {count, total_q_kg_h}
+    ids: list[int]
+
+
+class AreaSummary(BaseModel):
+    area_km2: float
+    min_p: float
+    minerals: MineralSummary | None
+    layers: list[LayerStats]
+    plumes: PlumeSummary
+
+
 class LegendItem(BaseModel):
     code: int
     label: str
     rgb: list[int]
+    fraction: float | None = None  # share of the scene's valid pixels
 
 
 class LayerInfo(BaseModel):

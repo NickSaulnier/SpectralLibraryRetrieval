@@ -132,3 +132,33 @@ def start_gas_job(ws, scene_id: str) -> str:
 
     threading.Thread(target=work, daemon=True).start()
     return job_id
+
+
+def start_unmix_job(ws, key: str, mineral_scene: str, polygon, max_pixels: int = 3000) -> str:
+    """Unmix the pixels of an area (viewer/unmix_area.py), or return the running job."""
+    with _LOCK:
+        if (job_id := _running(key, "unmix")) is not None:
+            return job_id
+        job_id = uuid.uuid4().hex[:8]
+        JOBS[job_id] = {
+            "scene_id": key,
+            "kind": "unmix",
+            "state": "running",
+            "progress": 0.0,
+            "started": time.time(),
+        }
+
+    def progress(fraction: float) -> None:
+        JOBS[job_id]["progress"] = round(fraction, 3)
+
+    def work() -> None:
+        from specret.viewer.unmix_area import unmix_area
+
+        try:
+            meta = unmix_area(ws, key, mineral_scene, polygon, max_pixels, progress)
+            JOBS[job_id].update(state="done", progress=1.0, result=meta)
+        except Exception as exc:  # reported through job_status
+            JOBS[job_id].update(state="failed", error=f"{exc}\n{traceback.format_exc()}")
+
+    threading.Thread(target=work, daemon=True).start()
+    return job_id

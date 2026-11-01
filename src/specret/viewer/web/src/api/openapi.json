@@ -737,6 +737,32 @@
        ],
        "title": "Colormap"
       }
+     },
+     {
+      "name": "groups",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Groups"
+      }
+     },
+     {
+      "name": "min_p",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "number",
+       "default": 0.0,
+       "title": "Min P"
+      }
      }
     ],
     "responses": {
@@ -875,6 +901,152 @@
     }
    }
   },
+  "/api/geo/{key}/summary": {
+   "post": {
+    "summary": "Geo Summary",
+    "description": "What is inside a polygon: mineral composition (the same computation as the MCP\nscene_summary tool), statistics of every continuous layer, and plumes whose source\nlies inside.",
+    "operationId": "geo_summary_api_geo__key__summary_post",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AreaRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AreaSummary"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/geo/{key}/unmix": {
+   "post": {
+    "summary": "Geo Unmix",
+    "description": "Start unmixing an area's pixels in the background; poll /api/jobs/{job_id}. The\nfraction layers appear in the scene's layer list when it is done.",
+    "operationId": "geo_unmix_api_geo__key__unmix_post",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UnmixRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": {
+          "type": "string"
+         },
+         "title": "Response Geo Unmix Api Geo  Key  Unmix Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/geo/{key}/agreement": {
+   "get": {
+    "summary": "Geo Agreement",
+    "description": "Agreement of our mineral groups with EMIT L2B MIN (built on first request).",
+    "operationId": "geo_agreement_api_geo__key__agreement_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Geo Agreement Api Geo  Key  Agreement Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/colormaps": {
    "get": {
     "summary": "Colormaps",
@@ -904,6 +1076,71 @@
  },
  "components": {
   "schemas": {
+   "AreaRequest": {
+    "properties": {
+     "polygon": {
+      "items": {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      },
+      "type": "array",
+      "title": "Polygon"
+     },
+     "min_p": {
+      "type": "number",
+      "title": "Min P",
+      "default": 0.3
+     }
+    },
+    "type": "object",
+    "required": [
+     "polygon"
+    ],
+    "title": "AreaRequest"
+   },
+   "AreaSummary": {
+    "properties": {
+     "area_km2": {
+      "type": "number",
+      "title": "Area Km2"
+     },
+     "min_p": {
+      "type": "number",
+      "title": "Min P"
+     },
+     "minerals": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/MineralSummary"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "layers": {
+      "items": {
+       "$ref": "#/components/schemas/LayerStats"
+      },
+      "type": "array",
+      "title": "Layers"
+     },
+     "plumes": {
+      "$ref": "#/components/schemas/PlumeSummary"
+     }
+    },
+    "type": "object",
+    "required": [
+     "area_km2",
+     "min_p",
+     "minerals",
+     "layers",
+     "plumes"
+    ],
+    "title": "AreaSummary"
+   },
    "Body_field_api_field_post": {
     "properties": {
      "file": {
@@ -989,6 +1226,41 @@
      "analyzed"
     ],
     "title": "GeoScene"
+   },
+   "GroupShare": {
+    "properties": {
+     "group": {
+      "type": "string",
+      "title": "Group"
+     },
+     "pixels": {
+      "type": "integer",
+      "title": "Pixels"
+     },
+     "fraction": {
+      "type": "number",
+      "title": "Fraction"
+     },
+     "median_p": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Median P"
+     }
+    },
+    "type": "object",
+    "required": [
+     "group",
+     "pixels",
+     "fraction",
+     "median_p"
+    ],
+    "title": "GroupShare"
    },
    "HTTPValidationError": {
     "properties": {
@@ -1082,6 +1354,98 @@
     ],
     "title": "LayerInfo"
    },
+   "LayerStats": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "title": {
+      "type": "string",
+      "title": "Title"
+     },
+     "units": {
+      "type": "string",
+      "title": "Units"
+     },
+     "pixels": {
+      "type": "integer",
+      "title": "Pixels"
+     },
+     "mean": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mean"
+     },
+     "median": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Median"
+     },
+     "p05": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P05"
+     },
+     "p95": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "P95"
+     },
+     "hist_edges": {
+      "items": {
+       "type": "number"
+      },
+      "type": "array",
+      "title": "Hist Edges"
+     },
+     "hist_counts": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Hist Counts"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "title",
+     "units",
+     "pixels",
+     "mean",
+     "median",
+     "p05",
+     "p95",
+     "hist_edges",
+     "hist_counts"
+    ],
+    "title": "LayerStats"
+   },
    "LegendItem": {
     "properties": {
      "code": {
@@ -1098,6 +1462,17 @@
       },
       "type": "array",
       "title": "Rgb"
+     },
+     "fraction": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fraction"
      }
     },
     "type": "object",
@@ -1107,6 +1482,83 @@
      "rgb"
     ],
     "title": "LegendItem"
+   },
+   "MineralSummary": {
+    "properties": {
+     "pixels": {
+      "type": "integer",
+      "title": "Pixels"
+     },
+     "groups": {
+      "items": {
+       "$ref": "#/components/schemas/GroupShare"
+      },
+      "type": "array",
+      "title": "Groups"
+     }
+    },
+    "type": "object",
+    "required": [
+     "pixels",
+     "groups"
+    ],
+    "title": "MineralSummary"
+   },
+   "PlumeSummary": {
+    "properties": {
+     "count": {
+      "type": "integer",
+      "title": "Count"
+     },
+     "by_gas": {
+      "additionalProperties": {
+       "additionalProperties": {
+        "type": "number"
+       },
+       "type": "object"
+      },
+      "type": "object",
+      "title": "By Gas"
+     },
+     "ids": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Ids"
+     }
+    },
+    "type": "object",
+    "required": [
+     "count",
+     "by_gas",
+     "ids"
+    ],
+    "title": "PlumeSummary"
+   },
+   "UnmixRequest": {
+    "properties": {
+     "polygon": {
+      "items": {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      },
+      "type": "array",
+      "title": "Polygon"
+     },
+     "max_pixels": {
+      "type": "integer",
+      "title": "Max Pixels",
+      "default": 3000
+     }
+    },
+    "type": "object",
+    "required": [
+     "polygon"
+    ],
+    "title": "UnmixRequest"
    },
    "ValidationError": {
     "properties": {
