@@ -54,7 +54,9 @@ One entry per source: where it came from, version, when it was fetched, and its 
 - **HRRR:** NOAA's public cloud bucket through `herbie`, no account. Tested 2026-10-31: 10 m wind at the Permian scene's overpass hour reads correctly
 - **MERRA-2** (`M2T1NXSLV`, GES DISC): works with the Earthdata login since the GES DISC archive was approved (2026-11-01). Tested: 10 m wind at the Permian scene, 2023-06-08 16:30 UTC, 1.5 m/s (HRRR: 2.0 m/s)
 - **Keyless ERA5** (Google ARCO zarr): not verified. Opening the full store took over 10 min and was stopped. Try the Open-Meteo historical API instead when the cross-check is built.
-- Nothing is downloaded in bulk: wind is read per scene and hour when quantifying
+- Nothing is downloaded in bulk: `io/wind.py` reads wind per plume and hour when quantifying, caching what it fetches:
+  - HRRR 10 m wind subsets go to `data/raw/hrrr/`;
+  - MERRA-2 daily files go to `data/raw/merra2/`.
 
 ## To fetch by hand
 

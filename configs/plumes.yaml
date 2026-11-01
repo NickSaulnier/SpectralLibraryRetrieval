@@ -56,3 +56,13 @@ identify:
   # A candidate is reported as a plume of its named gas at or above this calibrated confidence.
   # Chosen for about 1 false plume per 1000 km² on the no-plume scenes (results/gas_g2_identification.md).
   confidence_threshold: 0.2
+
+# Emission rates (gas/quantify.py): Q = IME * U_eff / sqrt(plume area)
+quantify:
+  # U_eff = a * U10 + b for EMIT's 60 m pixels, from large-eddy simulations
+  # (Ferrari et al. 2025, arXiv 2506.01113; PRISMA 0.37/0.70, EnMAP 0.37/0.69)
+  u_eff: [0.45, 0.67]
+  wind_min_relative_sd: 0.5  # wind uncertainty is at least this share of the speed
+  # Relative IME error not captured by the shifted-mask background: the spread of measured IME
+  # against the true mass inside the mask on injected CH4 plumes (results/gas_g3_quantification.md)
+  retrieval_rel_sd: 0.3

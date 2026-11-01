@@ -4,8 +4,27 @@
     {
       "name": "viewer",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "specret", "view", "--port", "8765"],
+      "runtimeArgs": [
+        "run",
+        "specret",
+        "view",
+        "--port",
+        "8765"
+      ],
       "port": 8765
+    },
+    {
+      "name": "viewer-dev",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--no-sync",
+        "specret",
+        "view",
+        "--port",
+        "8766"
+      ],
+      "port": 8766
     }
   ]
 }

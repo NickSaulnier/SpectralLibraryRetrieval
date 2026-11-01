@@ -122,6 +122,9 @@ def test_mcp_tools(workspace_root):
         async with Client(build_server(ws)) as c:
             res = (await c.call_tool("list_resources", {})).data
             assert res["sensors"] == ["emit"] and res["library_size"] == 4
+            assert res["gas_scenes"] == {}
+            names = {t.name for t in await c.list_tools()}
+            assert {"detect_plumes", "list_plumes", "explain_plume", "quantify_plume"} <= names
             out = (
                 await c.call_tool(
                     "identify_spectrum",
@@ -161,6 +164,8 @@ def test_viewer_field_upload(workspace_root):
     client = TestClient(create_app(ws))
     assert "Spectral Match Viewer" in client.get("/").text
     assert client.get("/api/scenes").json() == []
+    assert client.get("/api/gas/scenes").json() == []
+    assert client.get("/api/gas/20230608T162322_2315911_014/plumes").status_code == 404
 
     csv = "wavelength,rock\n" + "\n".join(
         f"{w},{v}" for w, v in zip(WL, 0.8 * MATERIALS["Kaolinite"], strict=True)

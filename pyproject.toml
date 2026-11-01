@@ -9,6 +9,7 @@ dependencies = [
     "earthaccess>=0.11",
     "fastapi>=0.115",
     "fastmcp>=2.10",
+    "herbie-data>=2024.8",
     "hitran-api>=1.2",
     "matplotlib>=3.8",
     "netcdf4>=1.7",

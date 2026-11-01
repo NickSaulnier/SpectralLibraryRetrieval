@@ -373,14 +373,65 @@ def cmd_detect_plumes(args: argparse.Namespace) -> None:
 
     for s in args.scenes:
         scene = open_emit_l1b(find_l1b(s))
-        enh = detect(scene, args.gas)
-        path = write_enhancement(scene, enh, Path(args.out))
-        sig = np.nanmedian(enh.result.sigma)
-        print(
-            f"{scene.scene_id}: {path} ({enh.seconds:.0f} s, background sigma "
-            f"{sig:.0f} ppm m, AMF {enh.conditions.amf:.2f}, H2O "
-            f"{enh.conditions.h2o_gcm2:.2f} g/cm2)"
-        )
+        if args.enhancement_only:
+            enh = detect(scene, args.gas)
+            path = write_enhancement(scene, enh, Path(args.out))
+            sig = np.nanmedian(enh.result.sigma)
+            print(
+                f"{scene.scene_id}: {path} ({enh.seconds:.0f} s, background sigma "
+                f"{sig:.0f} ppm m, AMF {enh.conditions.amf:.2f}, H2O "
+                f"{enh.conditions.h2o_gcm2:.2f} g/cm2)"
+            )
+            continue
+        from specret.gas.detect import prepare
+        from specret.gas.outputs import write_scene
+        from specret.gas.pipeline import analyze, build_plumes
+
+        prep = prepare(scene)
+        enh, recs = analyze(prep)
+        plumes = build_plumes(prep, enh, recs, wind=_wind_arg(args))
+        folder = write_scene(prep, enh, recs, plumes, Path(args.out))
+        print(f"{scene.scene_id}: {len(recs)} candidates, {len(plumes)} plumes -> {folder}")
+        for pl in plumes[: args.show]:
+            q = pl.quant
+            rate = f"{q.q_kg_h:,.0f} +/- {q.sigma_q_kg_h:,.0f} kg/h" if q else "no wind"
+            print(f"  #{pl.id} {pl.record.ident.gas} p={pl.confidence:.2f} {rate}")
+
+
+def _wind_arg(args: argparse.Namespace):
+    """A user wind from --wind U,V (m/s), or None to look it up."""
+    if not getattr(args, "wind", None):
+        return None
+    from specret.io.wind import Wind
+
+    u, v = (float(x) for x in args.wind.split(","))
+    w = Wind(u, v, "user")
+    w.sd = args.wind_sd if args.wind_sd is not None else 0.5 * w.speed
+    return w
+
+
+def cmd_quantify(args: argparse.Namespace) -> None:
+    import pandas as pd
+
+    from specret.gas.library import plume_config
+    from specret.gas.quantify import requantify
+    from specret.io.emit_l1b import find_l1b, scene_id
+
+    sid = scene_id(find_l1b(args.scene))
+    df = pd.read_csv(Path(args.out) / sid / "plumes.csv").set_index("plume_id")
+    if args.plume not in df.index:
+        raise SystemExit(f"no plume {args.plume} in {sid}; have {list(df.index)}")
+    r = df.loc[args.plume]
+    q = requantify(r.to_dict(), tuple(plume_config()["quantify"]["u_eff"]), _wind_arg(args))
+    print(f"{sid} plume {args.plume}: {r['gas']}, confidence {r['confidence']:.2f}")
+    print(f"  source {r['source_lat']:.5f}, {r['source_lon']:.5f}; {int(r['n_px'])} px")
+    print(f"  IME {q['ime_kg']:.1f} kg, L {q['length_m']:.0f} m")
+    print(
+        f"  wind {q['u10']:.2f} +/- {q['u10_sd']:.2f} m/s ({q['wind_source']}), "
+        f"U_eff {q['u_eff']:.2f} m/s"
+    )
+    budget = ", ".join(f"{k} {v:.0%}" for k, v in q["relative_uncertainty"].items())
+    print(f"  Q = {q['q_kg_h']:,.0f} +/- {q['sigma_q_kg_h']:,.0f} kg/h  ({budget})")
 
 
 def cmd_compare_ghg(args: argparse.Namespace) -> None:
@@ -873,14 +924,34 @@ def main(argv: list[str] | None = None) -> None:
 
     dp = sub.add_parser(
         "detect-plumes",
-        help="gas enhancement map (ppm m) from EMIT L1B radiance",
-        description="Column-wise matched filter on EMIT L1B radiance. Writes <gas>_enh.tif "
-        "(orthorectified) and <gas>_enh.json to outputs/gas/<scene id>/.",
+        help="find, identify and quantify gas plumes in EMIT L1B radiance",
+        description="CH4 and CO2 matched filters, candidate plumes, joint gas + confuser "
+        "identification, calibrated confidence and emission rates (wind from HRRR or MERRA-2). "
+        "Writes enhancement maps, plume_mask.tif, confidence.tif, plumes.geojson, plumes.csv "
+        "and candidates.csv to outputs/gas/<scene id>/. --enhancement-only writes one gas's "
+        "enhancement map and stops.",
     )
     dp.add_argument("scenes", nargs="+", help="EMIT scene ids or L1B RAD granule paths")
-    dp.add_argument("--gas", default="CH4", choices=["CH4", "CO2"])
+    dp.add_argument("--enhancement-only", action="store_true")
+    dp.add_argument("--gas", default="CH4", choices=["CH4", "CO2"], help="with --enhancement-only")
+    dp.add_argument("--wind", help="use this 10 m wind for every plume: U,V in m/s")
+    dp.add_argument("--wind-sd", type=float, help="its standard deviation (default half the speed)")
+    dp.add_argument("--show", type=int, default=10, help="plumes to print per scene")
     dp.add_argument("--out", default="outputs/gas")
     dp.set_defaults(func=cmd_detect_plumes)
+
+    qp = sub.add_parser(
+        "quantify",
+        help="emission rate of one plume, optionally with your own wind",
+        description="Recompute a plume's rate from plumes.csv (written by detect-plumes): "
+        "Q = IME * U_eff / L, with U_eff = a * U10 + b (configs/plumes.yaml).",
+    )
+    qp.add_argument("scene", help="EMIT scene id")
+    qp.add_argument("--plume", type=int, required=True)
+    qp.add_argument("--wind", help="10 m wind U,V in m/s (default: the one detect-plumes used)")
+    qp.add_argument("--wind-sd", type=float)
+    qp.add_argument("--out", default="outputs/gas")
+    qp.set_defaults(func=cmd_quantify)
 
     cg = sub.add_parser("compare-ghg", help="agreement with EMIT L2B CH4ENH/CO2ENH")
     cg.add_argument("scenes", nargs="+", help="scene ids already run through detect-plumes")

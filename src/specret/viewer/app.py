@@ -1,4 +1,5 @@
-"""Local web viewer: click a pixel on a mineral map, or drop in a field spectrum.
+"""Local web viewer: click a pixel on a mineral map, drop in a field spectrum, or look at gas
+plumes found in EMIT radiance.
 
 Run with `uv run specret view` and open http://127.0.0.1:8765. The page lists every scene
 and can map an unmapped one in the background. Clicking a pixel (or entering a lat/lon)
@@ -211,6 +212,97 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
             query = ws.to_sensor(spec.wavelength_nm, spec.reflectance, sensor)
             out.append({"name": spec.name, **spectrum_payload(sensor, query, res)})
         return out
+
+    # --- gas plumes (EMIT L1B radiance scenes) ---------------------------------------
+
+    def gas_folder(scene_id: str) -> Path:
+        if scene_id not in ws.gas_scenes():
+            raise HTTPException(404, f"no EMIT L1B radiance for {scene_id}")
+        return ws.gas_dir(scene_id)
+
+    @app.get("/api/gas/scenes")
+    def gas_scenes() -> list[dict]:
+        return [
+            {
+                "scene_id": sid,
+                "analyzed": (ws.gas_dir(sid) / "plumes.csv").exists(),
+                "job": jobs.running_job(sid, "gas"),
+            }
+            for sid in ws.gas_scenes()
+        ]
+
+    @app.post("/api/gas/{scene_id}")
+    def start_gas(scene_id: str) -> dict:
+        try:
+            return {"job_id": jobs.start_gas_job(ws, scene_id)}
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+    @app.get("/api/gas/{scene_id}/{gas}.png")
+    def gas_png(scene_id: str, gas: str) -> Response:
+        """Enhancement on the map grid (0 to the 99.5th percentile, magma-like ramp), with
+        plume outlines in cyan."""
+        import rasterio
+        from PIL import Image
+
+        folder = gas_folder(scene_id)
+        path = folder / f"{gas.lower()}_enh.tif"
+        if not path.exists():
+            raise HTTPException(404, f"no {gas} map for {scene_id}")
+        with rasterio.open(path) as ds:
+            a = ds.read(1).astype(np.float32)
+            a[a == ds.nodata] = np.nan
+        hi = float(np.nanpercentile(a, 99.5)) or 1.0
+        t = np.clip(np.nan_to_num(a, nan=0.0) / hi, 0, 1)
+        rgba = np.zeros(a.shape + (4,), dtype=np.uint8)
+        rgba[..., 0] = (255 * np.clip(1.6 * t, 0, 1)).astype(np.uint8)
+        rgba[..., 1] = (255 * np.clip(1.6 * t - 0.6, 0, 1)).astype(np.uint8)
+        rgba[..., 2] = (
+            255 * np.clip(0.5 + 0.5 * np.sin(np.pi * (t - 0.15)), 0, 1) * (t < 0.8)
+        ).astype(np.uint8)
+        rgba[..., 3] = np.where(np.isfinite(a), 255, 0)
+        mask_path = folder / "plume_mask.tif"
+        if mask_path.exists():
+            from scipy import ndimage
+
+            with rasterio.open(mask_path) as ds:
+                lab = ds.read(1)
+            edge = (lab > 0) & ~ndimage.binary_erosion(lab > 0)
+            rgba[edge] = (0, 230, 255, 255)
+        buf = io.BytesIO()
+        Image.fromarray(rgba, mode="RGBA").save(buf, format="PNG")
+        return Response(buf.getvalue(), media_type="image/png")
+
+    @app.get("/api/gas/{scene_id}/plumes")
+    def gas_plumes(scene_id: str) -> dict:
+        from specret.gas import tools
+
+        folder = gas_folder(scene_id)
+        try:
+            out = tools.list_plumes(folder)
+            summary = tools.scene_gas_summary(folder)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+        path = ws.gas_scenes()[scene_id]
+        import xarray as xr
+
+        with xr.open_dataset(path) as ds:
+            x0, dx, _, y0, _, dy = np.asarray(ds.attrs["geotransform"], dtype=float)
+        for pl in out["plumes"]:
+            if pl.get("source_lat") is not None:
+                pl["x"] = int(np.floor((pl["source_lon"] - x0) / dx))
+                pl["y"] = int(np.floor((pl["source_lat"] - y0) / dy))
+        out["summary"] = summary
+        return out
+
+    @app.get("/api/gas/{scene_id}/plume/{plume_id}")
+    def gas_plume(scene_id: str, plume_id: int) -> dict:
+        from specret.gas import tools
+
+        try:
+            return tools.explain_plume(gas_folder(scene_id), plume_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
 
     return app
 

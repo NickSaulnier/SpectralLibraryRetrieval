@@ -261,7 +261,76 @@ def inspect() -> list[Item]:
             hint="specret setup --map runs these, about 2 min per EMIT scene",
         )
     )
+    items.extend(_gas(ws))
     items.extend(_environment())
+    return items
+
+
+def _gas(ws) -> list[Item]:
+    """Gas plume prerequisites (PLAN_GAS.md): HITRAN tables, line-by-line cache, L1B scenes,
+    calibrated confidence and analyzed scenes. All optional for mineral work."""
+    from specret.gas.library import lbl_ranges, plume_config, window_path
+
+    hitran = Path("data/raw/hitran")
+    tables = sorted(p.stem for p in hitran.glob("*_vswir.data"))
+    have = {"CH4_vswir", "CO2_vswir", "H2O_vswir"} <= set(tables)
+    items = [
+        Item(
+            "hitran",
+            "optional",
+            "HITRAN line lists (gases)",
+            have,
+            f"{len(tables)} VSWIR tables" if tables else "not downloaded",
+            [["download", "hitran"]],
+        )
+    ]
+    cfg = plume_config()
+    ranges = lbl_ranges(cfg["matched_filter"]["windows"]["CH4"])
+    want = {*cfg["library"]["background_gases"], *cfg["library"]["plume_gases"]}
+    cached = []
+    for lo, hi in ranges:
+        path = window_path(lo, hi)
+        if path.exists():
+            with np.load(path) as z:
+                cached.append(want <= set(map(str, z["gases"])))
+        else:
+            cached.append(False)
+    items.append(
+        Item(
+            "gas_library",
+            "optional",
+            "Gas line-by-line cache",
+            all(cached),
+            f"{sum(cached)} of {len(ranges)} ranges built",
+            [] if all(cached) or not have else [["gas-library"]],
+            hint="about 5 min per range, once",
+        )
+    )
+    l1b = ws.gas_scenes()
+    done = [s for s in l1b if (ws.gas_dir(s) / "plumes.csv").exists()]
+    items.append(
+        Item(
+            "gas_scenes",
+            "optional",
+            "EMIT radiance scenes (gas)",
+            bool(l1b),
+            f"{len(l1b)} L1B scenes, {len(done)} analyzed" if l1b else "none",
+            [] if l1b else [["download", "emit-gas"]],
+            hint="specret detect-plumes <scene id> analyzes one (about 1-2 min)",
+        )
+    )
+    model = CALIBRATION / "gas_emit.json"
+    items.append(
+        Item(
+            "gas_confidence",
+            "optional",
+            "Gas plume confidence model",
+            model.is_file(),
+            "calibrated" if model.is_file() else "missing",
+            [] if model.is_file() or not l1b else [["gas-benchmark"]],
+            hint="specret gas-benchmark fits it from injected plumes (about 15 min)",
+        )
+    )
     return items
 
 

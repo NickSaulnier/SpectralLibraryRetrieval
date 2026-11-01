@@ -1,7 +1,9 @@
-"""Background scene-mapping jobs, shared by the MCP server and the viewer.
+"""Background jobs, shared by the MCP server and the viewer.
 
-A job maps every pixel of one scene in a daemon thread and writes the same outputs as
-`specret map-scene`. Its state is "running", "done" or "failed", with `progress` in 0-1.
+A "map" job maps every pixel of one scene in a daemon thread and writes the same outputs as
+`specret map-scene`. A "gas" job runs plume detection on an EMIT L1B scene and writes the same
+outputs as `specret detect-plumes`. Each job's state is "running", "done" or "failed", with
+`progress` in 0-1.
 """
 
 from __future__ import annotations
@@ -15,17 +17,21 @@ JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()
 
 
-def _running(scene_id: str) -> str | None:
+def _running(scene_id: str, kind: str = "map") -> str | None:
     for job_id, job in JOBS.items():
-        if job["scene_id"] == scene_id and job["state"] == "running":
+        if (
+            job["scene_id"] == scene_id
+            and job.get("kind", "map") == kind
+            and job["state"] == "running"
+        ):
             return job_id
     return None
 
 
-def running_job(scene_id: str) -> str | None:
-    """Id of the job currently mapping this scene, if any."""
+def running_job(scene_id: str, kind: str = "map") -> str | None:
+    """Id of the job currently working on this scene, if any."""
     with _LOCK:
-        return _running(scene_id)
+        return _running(scene_id, kind)
 
 
 def start_map_job(ws, scene_id: str) -> str:
@@ -82,3 +88,47 @@ def job_status(job_id: str) -> dict:
     job = dict(JOBS[job_id])
     job["elapsed_s"] = round(time.time() - job.pop("started"))
     return job
+
+
+def start_gas_job(ws, scene_id: str) -> str:
+    """Detect, identify and quantify plumes in an EMIT L1B scene, or return the running job."""
+    path = ws.gas_scenes().get(scene_id)
+    if path is None:
+        raise ValueError(f"no EMIT L1B radiance for '{scene_id}'; have {sorted(ws.gas_scenes())}")
+    with _LOCK:
+        if (job_id := _running(scene_id, "gas")) is not None:
+            return job_id
+        job_id = uuid.uuid4().hex[:8]
+        JOBS[job_id] = {
+            "scene_id": scene_id,
+            "kind": "gas",
+            "state": "running",
+            "progress": 0.0,
+            "started": time.time(),
+        }
+
+    def work() -> None:
+        from specret.gas.detect import prepare
+        from specret.gas.outputs import write_scene
+        from specret.gas.pipeline import analyze, build_plumes
+        from specret.io.emit_l1b import open_emit_l1b
+
+        try:
+            prep = prepare(open_emit_l1b(path))
+            JOBS[job_id]["progress"] = 0.2
+            enh, recs = analyze(prep)
+            JOBS[job_id]["progress"] = 0.8
+            plumes = build_plumes(prep, enh, recs)
+            folder = write_scene(prep, enh, recs, plumes, ws.gas_dir(scene_id).parent)
+            JOBS[job_id].update(
+                state="done",
+                progress=1.0,
+                plumes=len(plumes),
+                candidates=len(recs),
+                outputs=str(folder),
+            )
+        except Exception as exc:  # reported through job_status
+            JOBS[job_id].update(state="failed", error=f"{exc}\n{traceback.format_exc()}")
+
+    threading.Thread(target=work, daemon=True).start()
+    return job_id

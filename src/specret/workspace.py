@@ -78,6 +78,16 @@ class Workspace:
     def map_dir(self, scene_id: str) -> Path:
         return self.root / "outputs/maps" / scene_id
 
+    def gas_scenes(self) -> dict[str, Path]:
+        """EMIT L1B radiance granules for gas work, keyed by scene id (20230608T162322_...)."""
+        from specret.io.emit_l1b import scene_id
+
+        root = self.root / "data/scenes"
+        return {scene_id(p): p for p in sorted(root.rglob("EMIT_L1B_RAD_*.nc"))}
+
+    def gas_dir(self, scene_id: str) -> Path:
+        return self.root / "outputs/gas" / scene_id
+
     # --- loading ---------------------------------------------------------------------
 
     def library(self, sensor: str) -> SensorLibrary:

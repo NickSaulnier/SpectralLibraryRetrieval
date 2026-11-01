@@ -70,6 +70,18 @@
   #export { display: flex; gap: 6px; }
   #export button { font-size: 12px; padding: 2px 8px; }
   .swatch { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
+  #gas { margin: 0 20px 20px; }
+  @media (max-width: 860px) { #gas { margin: 0 16px 16px; } }
+  #gas .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  #gasgrid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr); gap: 16px; }
+  @media (max-width: 860px) { #gasgrid { grid-template-columns: 1fr; } }
+  #gaswrap { position: relative; overflow: auto; max-height: 60vh; border-radius: 6px; background: #000; }
+  #gasmap { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  #gasmarker { position: absolute; width: 16px; height: 16px; border: 2px solid #0ff; border-radius: 50%;
+               transform: translate(-50%, -50%); pointer-events: none; display: none; }
+  #plumes tr.sel td { background: var(--window); }
+  #plumes tbody tr { cursor: pointer; }
+  #plumedetail { margin-top: 10px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -104,6 +116,20 @@
     <table id="matches"></table>
   </section>
 </main>
+<section class="panel" id="gas">
+  <h2>Gas plumes (EMIT radiance)</h2>
+  <div class="controls">
+    <select id="gasscene" aria-label="Radiance scene"></select>
+    <select id="gasname" aria-label="Gas"><option>CH4</option><option>CO2</option></select>
+    <button id="gasbtn" class="primary" hidden>Detect plumes</button>
+    <span class="hint" id="gasstatus"></span>
+  </div>
+  <div id="gasgrid">
+    <div><div id="gaswrap"><img id="gasmap" alt="Gas enhancement map"><div id="gasmarker"></div></div>
+      <div class="hint">Enhancement from 0 to its 99.5th percentile (ppm·m); cyan outlines are reported plumes.</div></div>
+    <div><table id="plumes"></table><div id="plumedetail"></div></div>
+  </div>
+</section>
 <script>
 const $ = (id) => document.getElementById(id);
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -294,7 +320,78 @@ drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.ad
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
 $('file').addEventListener('change', (e) => e.target.files[0] && uploadFile(e.target.files[0]));
+// --- gas plumes ---
+let gasScenes = [], gasScene = null, gasPolling = null, plumeRows = [];
+const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d });
+async function loadGas(select) {
+  gasScenes = await (await fetch('/api/gas/scenes')).json();
+  if (!gasScenes.length) { $('gas').hidden = true; return; }
+  $('gasscene').innerHTML = gasScenes.map(s => `<option value="${s.scene_id}">${s.scene_id}${s.analyzed ? '' : ' (not analyzed)'}</option>`).join('');
+  $('gasscene').value = select || (gasScenes.find(s => s.analyzed) || gasScenes[0]).scene_id;
+  showGas($('gasscene').value);
+}
+$('gasscene').onchange = () => showGas($('gasscene').value);
+$('gasname').onchange = () => gasScene && showGas(gasScene);
+async function showGas(id) {
+  gasScene = id; clearInterval(gasPolling);
+  const info = gasScenes.find(s => s.scene_id === id);
+  $('gasmarker').style.display = 'none'; $('plumedetail').innerHTML = '';
+  $('gasbtn').hidden = info.analyzed || !!info.job;
+  if (!info.analyzed) {
+    $('gasmap').removeAttribute('src'); $('plumes').innerHTML = '';
+    $('gasstatus').textContent = info.job ? 'Detecting…' : 'Not analyzed yet: detection takes a minute or two.';
+    if (info.job) watchGas(info.job);
+    return;
+  }
+  $('gasmap').src = `/api/gas/${id}/${$('gasname').value}.png`;
+  const res = await fetch(`/api/gas/${id}/plumes`);
+  if (!res.ok) { $('gasstatus').textContent = await errorText(res); return; }
+  const d = await res.json(); plumeRows = d.plumes;
+  const parts = Object.entries(d.summary).filter(([k, v]) => v && v.plumes)
+    .map(([g, v]) => `${g}: ${v.plumes} plumes, ${fmt(v.total_q_kg_h)} kg/h in total`);
+  $('gasstatus').textContent = `${d.summary.plumes} plumes from ${d.summary.candidates ?? '?'} candidates. ${parts.join('; ')}`;
+  $('plumes').innerHTML = `<thead><tr><th>#</th><th>Gas</th><th class="num">Conf.</th><th class="num">Q (kg/h)</th><th class="num">±1σ</th><th class="num">Wind (m/s)</th><th>Fitted confusers</th></tr></thead><tbody>` +
+    plumeRows.map(p => `<tr data-id="${p.plume_id}"><td>${p.plume_id}</td><td>${p.gas}</td><td class="num">${fmt(p.confidence, 2)}</td>
+      <td class="num">${fmt(p.q_kg_h)}</td><td class="num">${fmt(p.sigma_q_kg_h)}</td><td class="num">${fmt(p.u10, 1)}</td>
+      <td class="ev">${(p.confusers_fitted || '').replaceAll('confuser:', '').replaceAll(';', ', ') || '–'}</td></tr>`).join('') + '</tbody>';
+  $('plumes').querySelectorAll('tbody tr').forEach(tr => tr.onclick = () => showPlume(+tr.dataset.id));
+}
+async function showPlume(pid) {
+  $('plumes').querySelectorAll('tr').forEach(tr => tr.classList.toggle('sel', +tr.dataset.id === pid));
+  const p = plumeRows.find(r => r.plume_id === pid), img = $('gasmap'), m = $('gasmarker');
+  if (p && p.x != null && img.naturalWidth) {
+    m.style.left = `${img.offsetLeft + (p.x + 0.5) * img.clientWidth / img.naturalWidth}px`;
+    m.style.top = `${img.offsetTop + (p.y + 0.5) * img.clientHeight / img.naturalHeight}px`;
+    m.style.display = 'block'; m.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  const e = await (await fetch(`/api/gas/${gasScene}/plume/${pid}`)).json();
+  const terms = Object.entries(e.fitted_terms).map(([k, v]) => `${k.replace('confuser:', 'confuser ')} ${fmt(v, k.startsWith('confuser') ? 3 : 0)}`).join(', ');
+  const unc = Object.entries(e.relative_uncertainty).map(([k, v]) => `${k} ${fmt(100 * v)}%`).join(', ');
+  $('plumedetail').innerHTML = `<b>Plume ${pid}: ${e.gas}</b>, confidence ${fmt(e.confidence, 2)} · source ${fmt(p.source_lat, 5)}, ${fmt(p.source_lon, 5)}
+    <div class="ev">Fit: ${terms}</div>
+    <div class="ev">IME ${fmt(e.rate.ime_kg, 1)} kg, L ${fmt(e.rate.length_m)} m, wind ${fmt(e.rate.u10, 2)} m/s (${e.rate.wind_source}), U<sub>eff</sub> ${fmt(e.rate.u_eff, 2)} m/s</div>
+    <div class="ev">Uncertainty: ${unc}${e.carbonate_fraction != null ? ` · carbonate under plume ${fmt(100 * e.carbonate_fraction)}%` : ''}</div>
+    <table>${Object.entries(e.evidence).map(([k, v]) => `<tr><td>${k}</td><td class="num">${fmt(v, 2)}</td><td class="ev">${e.evidence_meaning[k] || ''}</td></tr>`).join('')}</table>`;
+}
+$('gasbtn').onclick = async () => {
+  const res = await fetch(`/api/gas/${gasScene}`, { method: 'POST' });
+  if (!res.ok) { $('gasstatus').textContent = await errorText(res); return; }
+  $('gasbtn').hidden = true; watchGas((await res.json()).job_id);
+};
+function watchGas(jobId) {
+  const id = gasScene;
+  const tick = async () => {
+    const res = await fetch(`/api/jobs/${jobId}`);
+    if (!res.ok) { clearInterval(gasPolling); $('gasstatus').textContent = await errorText(res); return; }
+    const j = await res.json();
+    $('gasstatus').textContent = `Detecting… ${Math.round(100 * j.progress)}% · ${j.elapsed_s} s`;
+    if (j.state === 'done') { clearInterval(gasPolling); if (gasScene === id) loadGas(id); }
+    if (j.state === 'failed') { clearInterval(gasPolling); $('gasstatus').textContent = `Detection failed: ${j.error}`; $('gasbtn').hidden = false; }
+  };
+  clearInterval(gasPolling); gasPolling = setInterval(tick, 2000); tick();
+}
 loadScenes();
+loadGas();
 </script>
 </body>
 </html>

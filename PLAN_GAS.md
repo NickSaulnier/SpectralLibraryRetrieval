@@ -118,7 +118,8 @@ src/specret/
   gas/
     library.py                # HITRAN line-by-line cross-sections per layer -> data/derived/gas/lbl_<range>.npz
     detect.py                 # scene pipeline: windows, targets, screens, matched filter, outputs
-    pipeline.py               # G2 scene analysis: both gases' maps, candidates, identification
+    pipeline.py               # G2/G3 scene analysis: maps, candidates, identification, plume records
+    tools.py                  # read-side helpers for MCP and the viewer (list, explain, requantify)
     signatures.py             # unit absorption spectra per scene: VSWIR (AMF, H2O LUT), LWIR (thermal contrast)
     matched_filter.py         # column-wise robust mean/cov (torch), MF, ACE, two-pass plume exclusion
     identify.py               # joint multi-gas + confuser fit, BIC selection, calibrated confidence
@@ -260,6 +261,20 @@ Still open:
 - Confidence is calibrated (ECE ≤ 0.1).
 
 ### Phase G3: Plume segmentation and quantification (2–3 weeks)
+
+**Status (2026-11-01): built; the rate exit criterion is untestable without release data.** Details in `results/gas_g3_quantification.md`.
+- **Wind:** `io/wind.py` reads HRRR in the US and MERRA-2 globally.
+- **Quantification:** `gas/quantify.py` gives IME, U_eff = 0.45·U10 + 0.67 for EMIT (Ferrari et al. 2025), the upwind source, and Q with a four-term uncertainty budget.
+- **Outputs:** plume records, `plumes.geojson`, `plumes.csv` and `candidates.csv`.
+- **CLI:** `detect-plumes` runs the full pipeline, and `quantify` recomputes one plume's rate.
+- **Integration:**
+  - MCP: `detect_plumes`, `list_plumes`, `explain_plume`, `quantify_plume`, `gas_signature`, and a gas section in `scene_summary`;
+  - viewer: a gas panel;
+  - `doctor`: the gas checks.
+- **Injected plumes:** IME is unbiased against the mass inside the mask, and the stated σ covers 80% within 1σ on held-out draws, after adding a measured 30% retrieval term.
+- **Against EMIT catalogue rates:** ours are about 2.6× higher, from the estimator. EMIT integrates within one fetch length of the source with U10; we integrate the whole mask with U_eff/√area.
+- **Diffuse plumes:** large ones are named CH4 only 58% of the time, against 97% for compact ones. That explains G2's three missed Turkmenistan plumes; pixel-weighted averaging is the follow-up.
+- **Agent question:** the MCP criterion is met.
 
 - `gas/plumes.py`, `io/wind.py` and `gas/quantify.py`. U_eff coefficients go into `configs/plumes.yaml`: start from published values for 30 m and 60 m pixels, and refit on injected LES plumes if any are available.
 - Plume records, `plumes.geojson`, and the CLI `quantify` command.

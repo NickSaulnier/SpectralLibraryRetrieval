@@ -8,6 +8,7 @@ records carry the features for the confidence model (eval/gas_benchmark.py calib
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -18,12 +19,14 @@ from specret.gas.confusers import build_confusers, mineral_screen
 from specret.gas.detect import Enhancement, Prepared, enhancement
 from specret.gas.identify import FitContext, Identification, identify, relative_residual
 from specret.gas.library import plume_config
-from specret.gas.plumes import Candidate, find_candidates
+from specret.gas.plumes import Candidate, column_z, find_candidates, smooth_nan
+from specret.gas.quantify import Quantification, quantify
 from specret.gas.signatures import window_absorption
 from specret.io.emit_l1b import sibling
 
 LIBRARY_NPZ = Path("data/resampled/emit/library.npz")
 CANONICAL = Path("data/canonical/library.parquet")
+MODEL_PATH = Path("configs/calibration/gas_emit.json")
 
 
 @dataclass
@@ -121,3 +124,118 @@ def analyze(
             frac = screen(c.rows, c.cols) if screen else None
             records.append(CandidateRecord(g, c, ident, frac))
     return enh, records
+
+
+@dataclass
+class Plume:
+    """A candidate the identifier names with enough confidence, quantified."""
+
+    id: int
+    record: CandidateRecord
+    confidence: float
+    quant: Quantification | None  # None when no wind could be had
+
+    def row(self) -> dict:
+        c, i = self.record.candidate, self.record.ident
+        out = {
+            "plume_id": self.id,
+            "gas": i.gas,
+            "confidence": self.confidence,
+            "detection_gas": self.record.detection_gas,
+            "candidate_id": c.id,
+            "n_px": c.n_px,
+            "mean_alpha_ppmm": c.mean_alpha,
+            "max_alpha_ppmm": c.max_alpha,
+            "terms": ";".join(f"{k}={v:.3g}" for k, v in i.terms.items()),
+            "confusers_fitted": ";".join(t for t in i.terms if t.startswith("confuser:")),
+            "carbonate_fraction": self.record.mineral_fraction,
+        }
+        if self.quant is not None:
+            q = self.quant.as_dict()
+            parts = q.pop("sigma_parts")
+            out.update(q)
+            out.update({f"rel_sigma_{k}": v for k, v in parts.items()})
+        return out
+
+
+def confidence_model(path: Path = MODEL_PATH):
+    from specret.openset.calibrate import ConfidenceModel
+
+    return ConfidenceModel.load(path) if path.exists() else None
+
+
+def scene_time(prep: Prepared) -> datetime:
+    sid = prep.scene.scene_id
+    return datetime.strptime(sid.split("_")[0], "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
+
+
+def build_plumes(
+    prep: Prepared,
+    enh: dict[str, Enhancement],
+    records: list[CandidateRecord],
+    wind=None,
+    model=None,
+    threshold: float | None = None,
+) -> list[Plume]:
+    """Plumes from identified candidates, most confident first. `wind` overrides the wind
+    lookup (an io.wind.Wind for every plume); otherwise HRRR/MERRA-2 at each plume's source."""
+    import pandas as pd
+
+    from specret.io.wind import wind_at
+
+    cfg = plume_config()
+    threshold = cfg["identify"]["confidence_threshold"] if threshold is None else threshold
+    model = model or confidence_model()
+    if not records:
+        return []
+    feats = pd.DataFrame([r.ident.features for r in records])
+    p = model.predict(feats) if model is not None else np.ones(len(records))
+    keep = [
+        (r, float(pi))
+        for r, pi in zip(records, p, strict=True)
+        if r.ident.gas is not None and pi >= threshold
+    ]
+    keep.sort(key=lambda t: -t[1])
+    # Two detection maps can find the same plume: keep the more confident record
+    taken = np.zeros(prep.scene.shape, dtype=bool)
+    occupied = np.zeros(prep.scene.shape, dtype=bool)
+    for r in records:
+        occupied[r.candidate.rows, r.candidate.cols] = True
+    occupied = ndimage.binary_dilation(occupied, iterations=3)
+    z = {g: column_z(smooth_nan(e.alpha.astype(np.float64), 1.0)) for g, e in enh.items()}
+    qcfg = cfg["quantify"]
+    t = scene_time(prep)
+    plumes = []
+    for r, pi in keep:
+        c = r.candidate
+        if taken[c.rows, c.cols].mean() > 0.5:
+            continue
+        taken[c.rows, c.cols] = True
+        gas = r.ident.gas
+        # Quantify on the named gas's own map (a CH4 plume found in the CO2 map, say)
+        g_map = gas if gas in enh else r.detection_gas
+        w = wind
+        if w is None:
+            lat, lon = prep.scene.lat[c.rows, c.cols].mean(), prep.scene.lon[c.rows, c.cols].mean()
+            try:
+                w = wind_at(float(lat), float(lon), t, min_relative_sd=qcfg["wind_min_relative_sd"])
+            except Exception:
+                w = None
+        quant = None
+        if w is not None:
+            quant = quantify(
+                enh[g_map].alpha,
+                z[g_map],
+                c,
+                gas,
+                prep.scene.lat,
+                prep.scene.lon,
+                prep.conditions.surface_km,
+                w,
+                occupied,
+                tuple(qcfg["u_eff"]),
+                cfg["candidates"]["z_low"],
+                retrieval_rel_sd=qcfg["retrieval_rel_sd"],
+            )
+        plumes.append(Plume(len(plumes) + 1, r, pi, quant))
+    return plumes
