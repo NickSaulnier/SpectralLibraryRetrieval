@@ -115,7 +115,8 @@ $('map').addEventListener('click', async (ev) => {
   const res = await fetch(`/api/pixel/${scene}?x=${x}&y=${y}`);
   if (!res.ok) { $('status').textContent = (await res.json()).detail; return; }
   const d = await res.json();
-  $('status').textContent = `Pixel row ${d.pixel.row}, col ${d.pixel.col} · ${d.pixel.lat.toFixed(4)}°, ${d.pixel.lon.toFixed(4)}°`;
+  const where = d.pixel.lat == null ? '' : ` · ${d.pixel.lat.toFixed(4)}°, ${d.pixel.lon.toFixed(4)}°`;
+  $('status').textContent = `Pixel row ${d.pixel.row}, col ${d.pixel.col}${where}`;
   render(d);
 });
 

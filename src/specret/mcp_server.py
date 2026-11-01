@@ -224,7 +224,7 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
         lat = lon = None
         if bbox is not None:
             scene = ws.scene(scene_id)
-            lat, lon = scene.lat, scene.lon
+            lat, lon = getattr(scene, "lat", None), getattr(scene, "lon", None)
         df = group_fractions(smap, lat, lon, tuple(bbox) if bbox else None, min_p)
         rows = [
             {

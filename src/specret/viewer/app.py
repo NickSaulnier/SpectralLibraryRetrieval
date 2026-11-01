@@ -125,21 +125,22 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
     def pixel(scene_id: str, x: int, y: int) -> dict:
         """Identify the pixel under ortho-image coordinates (x, y)."""
         scene = ws.scene(scene_id)
-        if not (0 <= y < scene.glt_y.shape[0] and 0 <= x < scene.glt_x.shape[1]):
-            raise HTTPException(400, "outside the image")
-        gy, gx = int(scene.glt_y[y, x]), int(scene.glt_x[y, x])
-        if gy <= 0 or gx <= 0:
-            raise HTTPException(404, "no data at this location")
-        row, col = gy - 1, gx - 1
+        if hasattr(scene, "glt_y"):  # EMIT: map grid -> swath through the lookup table
+            if not (0 <= y < scene.glt_y.shape[0] and 0 <= x < scene.glt_x.shape[1]):
+                raise HTTPException(400, "outside the image")
+            row, col = int(scene.glt_y[y, x]) - 1, int(scene.glt_x[y, x]) - 1
+            if row < 0 or col < 0:
+                raise HTTPException(404, "no data at this location")
+        else:  # AVIRIS: the cube is already on its map grid
+            if not (0 <= y < scene.shape[0] and 0 <= x < scene.shape[1]):
+                raise HTTPException(400, "outside the image")
+            row, col = y, x
         sensor = ws.sensor_for_scene(scene)
         spectrum = scene.pixel(row, col)
+        if not np.isfinite(spectrum).any():
+            raise HTTPException(404, "no data at this location")
         result = ws.identify(spectrum, sensor, k=5, unmix=True)
-        result["pixel"] = {
-            "row": row,
-            "col": col,
-            "lat": float(scene.lat[row, col]),
-            "lon": float(scene.lon[row, col]),
-        }
+        result["pixel"] = ws.pixel_info(scene, row, col)
         return spectrum_payload(sensor, spectrum, result)
 
     @app.post("/api/field")

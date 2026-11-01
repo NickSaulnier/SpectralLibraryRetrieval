@@ -138,6 +138,8 @@ class Workspace:
         info = {"row": int(row), "col": int(col)}
         if hasattr(scene, "lat"):
             info.update(lat=float(scene.lat[row, col]), lon=float(scene.lon[row, col]))
+        elif hasattr(scene, "pixel_latlon") and (ll := scene.pixel_latlon(row, col)):
+            info.update(lat=ll[0], lon=ll[1])
         return info
 
     # --- operations ------------------------------------------------------------------

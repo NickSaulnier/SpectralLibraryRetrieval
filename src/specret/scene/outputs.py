@@ -1,6 +1,7 @@
 """Write scene maps as cloud-optimised GeoTIFFs plus legend tables.
 
-Layers (orthorectified with the scene's geometry lookup table):
+Layers (EMIT maps are orthorectified with the scene's geometry lookup table; AVIRIS products
+are already on a map grid and keep its georeference, if the header has map info):
 * group.tif       uint8 taxonomy group code of the best match (0 = no data), with a colour table
 * top1_row.tif    int32 library row of the best match (-1 = no data); see library.csv
 * score.tif       float32 ranking score of the best match, 0-1
@@ -65,8 +66,9 @@ def write_scene_maps(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     codes = group_codes(list(smap.library_groups))
-    transform = Affine.from_gdal(*scene.geotransform) if scene.geotransform else Affine.identity()
-    crs = scene.crs_wkt or "EPSG:4326"
+    gt = getattr(scene, "geotransform", None)
+    transform = Affine.from_gdal(*gt) if gt else Affine.identity()
+    crs = (scene.crs_wkt or "EPSG:4326") if gt else None
 
     top1 = smap.top_rows[..., 0]
     group_code = np.zeros(smap.shape, dtype=np.uint8)

@@ -243,3 +243,74 @@ def test_cli_identify_scene_pixel(workspace_root, monkeypatch, capsys):
         main(["identify", "EMIT_L2A_RFL_fake", "--row", "9", "--col", "0"])
     with pytest.raises(SystemExit, match="give row and col"):
         main(["identify", "EMIT_L2A_RFL_fake"])
+
+
+UTM11_MAP_INFO = ["UTM", "1.000", "1.000", "500000.0", "4160000.0", "15.0", "15.0", "11", "North",
+                  "WGS-84", "units=Meters"]  # fmt: skip
+
+
+def write_aviris(path: Path, map_info: list | None = UTM11_MAP_INFO) -> Path:
+    """A 3x4 ENVI cube laid out like FakeScene, with -9999 fill at (0, 0)."""
+    import spectral.io.envi as envi
+
+    cube = np.stack([FakeScene().cube[r] for r in range(3)]).astype(np.float32)
+    cube[0, 0] = -9999
+    meta = {
+        "wavelength": WL.tolist(),
+        "fwhm": [8.0] * WL.size,
+        "wavelength units": "Nanometers",
+        "data ignore value": -9999,
+    }
+    if map_info:
+        meta["map info"] = map_info
+    path.parent.mkdir(parents=True, exist_ok=True)
+    envi.save_image(str(path), cube, metadata=meta, force=True)
+    return path
+
+
+def test_aviris_georeference(tmp_path):
+    from specret.io.aviris import open_aviris
+
+    scene = open_aviris(write_aviris(tmp_path / "f_geo_img.hdr"))
+    assert scene.geotransform == (500000.0, 15.0, 0.0, 4160000.0, 0.0, -15.0)
+    assert np.isnan(scene.pixel(0, 0)).all()
+    lat, lon = scene.pixel_latlon(1, 2)
+    assert 37.5 < lat < 37.6 and -117.01 < lon < -116.99  # UTM 11N, near its central meridian
+    assert scene.nearest_pixel(lat, lon) == (1, 2)
+    with pytest.raises(ValueError, match="outside"):
+        scene.nearest_pixel(lat + 1, lon)
+
+    bare = open_aviris(write_aviris(tmp_path / "f_bare_img.hdr", map_info=None))
+    assert bare.geotransform is None and bare.pixel_latlon(0, 1) is None
+    with pytest.raises(ValueError, match="no map info"):
+        bare.nearest_pixel(lat, lon)
+
+
+def test_aviris_map_viewer_and_identify(workspace_root, monkeypatch, capsys):
+    from fastapi.testclient import TestClient
+
+    from specret.cli import main
+    from specret.viewer.app import create_app
+    from specret.workspace import Workspace
+
+    hdr = write_aviris(workspace_root / "data/scenes/aviris/f_test_img.hdr")
+    monkeypatch.chdir(workspace_root)
+    main(["map-scene", "data/resampled/emit/library.npz", "--scene", str(hdr), "--chapters", "M"])
+    with rasterio.open(workspace_root / "outputs/maps/f_test_img/group.tif") as src:
+        assert src.crs.to_epsg() == 32611 and src.transform.c == 500000.0
+        assert src.read(1)[0, 0] == 0  # fill pixel -> no data
+
+    client = TestClient(create_app(Workspace(root=workspace_root, chapters=None)))
+    assert client.get("/api/scenes").json() == [
+        {"scene_id": "f_test_img", "kind": "aviris", "mapped": True}
+    ]
+    assert client.get("/api/map/f_test_img.png").status_code == 200
+    body = client.get("/api/pixel/f_test_img", params={"x": 2, "y": 0}).json()
+    assert body["summary"]["best_group"] == "calcite"  # (0 + 2) % 4 -> Calcite
+    assert 37.5 < body["pixel"]["lat"] < 37.6
+    assert client.get("/api/pixel/f_test_img", params={"x": 0, "y": 0}).status_code == 404
+    assert client.get("/api/pixel/f_test_img", params={"x": 9, "y": 0}).status_code == 400
+
+    lat, lon = body["pixel"]["lat"], body["pixel"]["lon"]
+    main(["identify", "f_test_img", "--lat", str(lat), "--lon", str(lon), "--chapters", "all"])
+    assert "pixel row 0, col 2" in capsys.readouterr().out
