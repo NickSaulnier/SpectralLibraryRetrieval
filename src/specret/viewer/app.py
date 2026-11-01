@@ -16,14 +16,16 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from specret.scene import jobs
 from specret.scene.mapper import SceneMap
 from specret.scene.outputs import group_codes, group_colors
 from specret.workspace import UNKNOWN_BELOW, Workspace, jsonable
 
-STATIC = Path(__file__).parent / "static"
+STATIC = Path(__file__).parent / "static"  # app/ holds the React build of viewer/web (committed)
 UNKNOWN_CODE = 255  # map code for pixels whose calibrated confidence is below UNKNOWN_BELOW
 UNKNOWN_RGB = (128, 128, 128)
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -32,8 +34,14 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 def create_app(ws: Workspace | None = None) -> FastAPI:
     ws = ws or Workspace()
     app = FastAPI(title="specret viewer")
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     # Read once, so a running server always serves the page that matches its own endpoints.
-    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    legacy = (STATIC / "index.html").read_text(encoding="utf-8")
+    app_dir = STATIC / "app"
+    built = app_dir / "index.html"
+    page = built.read_text(encoding="utf-8") if built.exists() else legacy
+    if (app_dir / "assets").is_dir():
+        app.mount("/app/assets", StaticFiles(directory=app_dir / "assets"), name="assets")
 
     @lru_cache(maxsize=4)
     def scene_map(scene_id: str) -> SceneMap:
@@ -75,7 +83,13 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
+        """The React app (built into static/app), or the legacy page if it is not built."""
         return page
+
+    @app.get("/legacy", response_class=HTMLResponse)
+    def legacy_page() -> str:
+        """The original single-page viewer, kept until the React app reaches parity."""
+        return legacy
 
     @app.get("/static/plotly.min.js")
     def plotly_js() -> Response:

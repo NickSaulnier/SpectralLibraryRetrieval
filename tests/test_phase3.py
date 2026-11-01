@@ -388,3 +388,51 @@ def test_viewer_serves_the_page_it_started_with(workspace_root, tmp_path, monkey
     client = TestClient(specret.viewer.app.create_app(Workspace(root=workspace_root)))
     (static / "index.html").write_text("<p>v2</p>", encoding="utf-8")  # code updated on disk
     assert client.get("/").text == "<p>v1</p>"
+
+
+def test_viewer_serves_the_react_build_and_keeps_the_legacy_page(
+    workspace_root, tmp_path, monkeypatch
+):
+    from fastapi.testclient import TestClient
+
+    import specret.viewer.app
+    from specret.workspace import Workspace
+
+    static = tmp_path / "static"
+    (static / "app" / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<p>legacy</p>", encoding="utf-8")
+    (static / "app" / "index.html").write_text(
+        '<script src="/app/assets/index-x.js"></script>', encoding="utf-8"
+    )
+    (static / "app" / "assets" / "index-x.js").write_text("console.log(1)", encoding="utf-8")
+    monkeypatch.setattr(specret.viewer.app, "STATIC", static)
+    client = TestClient(specret.viewer.app.create_app(Workspace(root=workspace_root)))
+    assert "/app/assets/index-x.js" in client.get("/").text
+    assert client.get("/legacy").text == "<p>legacy</p>"
+    assert client.get("/app/assets/index-x.js").text == "console.log(1)"
+
+
+def test_committed_viewer_build_is_complete():
+    """The React build is committed: its index must point at assets that exist."""
+    import re
+
+    from specret.viewer.app import STATIC
+
+    index = STATIC / "app" / "index.html"
+    assert index.exists(), "run `pnpm run build` (or npm) in src/specret/viewer/web"
+    refs = re.findall(r'(?:src|href)="/app/(assets/[^"]+)"', index.read_text(encoding="utf-8"))
+    assert refs and all((STATIC / "app" / r).exists() for r in refs)
+
+
+def test_committed_viewer_build_matches_its_sources():
+    """Fails when src/specret/viewer/web changed without rebuilding (pnpm run build)."""
+    import importlib.util
+
+    from specret.viewer.app import STATIC
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "viewer_source_hash.py"
+    spec = importlib.util.spec_from_file_location("viewer_source_hash", script)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    recorded = (STATIC / "app" / "source-hash.txt").read_text(encoding="utf-8").strip()
+    assert recorded == mod.source_hash(), "viewer sources changed: rebuild with `pnpm run build`"

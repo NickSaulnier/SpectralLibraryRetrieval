@@ -1,0 +1,32 @@
+{
+  "name": "specret-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && uv run --no-sync python ../../../../scripts/viewer_source_hash.py ../static/app/source-hash.txt",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "api": "uv run --no-sync python ../../../../scripts/export_openapi.py src/api/openapi.json && openapi-typescript src/api/openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5",
+    "plotly.js-basic-dist-min": "^3",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10",
+    "@testing-library/jest-dom": "^6",
+    "@testing-library/react": "^16",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "jsdom": "^26",
+    "openapi-typescript": "^7",
+    "typescript": "~5.8",
+    "vite": "^6",
+    "vitest": "^3"
+  }
+}

@@ -25,3 +25,6 @@ outputs/
 
 # Trained model weights (rebuild with `specret train-encoder`)
 models/
+
+# Viewer frontend dependencies (src/specret/viewer/web)
+node_modules/

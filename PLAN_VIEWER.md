@@ -87,6 +87,19 @@ src/specret/viewer/
 
 ### Phase V0: Scaffold and parity (1 week)
 
+**Status (2026-11-01): done.**
+- **App:** React 19 + TypeScript + Vite in `viewer/web/`, built into `viewer/static/app/` (committed).
+- **Served:** FastAPI serves the app at `/` with gzip, and the old page at `/legacy`.
+- **Parity, checked in the browser:**
+  - mineral map with pan, zoom and fit;
+  - pixel click, lat/lon search and field upload, each identified with the chart and matches;
+  - CSV exports;
+  - mapping jobs;
+  - EMIT gas panel: plume table, plume details, source marker and detection jobs.
+- **Tests:** 7 Vitest tests; pytest checks the build is complete and matches its sources (a source hash).
+- **Packages:** installed with pnpm, because this machine's global npm shim is broken (`web/README.md`).
+- **Type gap:** response bodies are typed by hand until endpoints get Pydantic models, which come with the V1 layer API.
+
 - Vite + React + TypeScript app in `viewer/web/`, built into `viewer/static/app/`. `app.py` serves it at `/`. The old page stays at `/legacy` until parity is confirmed, then is removed.
 - Generated API types and a small typed fetch layer.
 - Feature parity with today:
