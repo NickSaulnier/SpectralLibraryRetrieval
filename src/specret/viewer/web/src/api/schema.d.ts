@@ -11,8 +11,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Index */
+        /**
+         * Index
+         * @description The React app (built into static/app), or the legacy page if it is not built.
+         */
         get: operations["index__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/legacy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Legacy Page
+         * @description The original single-page viewer, kept until the React app reaches parity.
+         */
+        get: operations["legacy_page_legacy_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -252,6 +275,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/geo/scenes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geo Scene List
+         * @description Every scene the map can show: its footprint and which kinds of layers it has.
+         */
+        get: operations["geo_scene_list_api_geo_scenes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/geo/{key}/layers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geo Layers
+         * @description The layers of one scene, in drawing order (bottom first).
+         */
+        get: operations["geo_layers_api_geo__key__layers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tiles/{layer_id}/{z}/{x}/{y}.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Tile
+         * @description One 256 px Web Mercator tile. Layers built on first use (true colour, L2B MIN)
+         *     are built by the first request, which takes a few seconds.
+         */
+        get: operations["tile_api_tiles__layer_id___z___x___y__png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/geo/{key}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geo Values
+         * @description Each ready layer's value at a location (categorical layers give their label).
+         */
+        get: operations["geo_values_api_geo__key__values_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/geo/{key}/plumes.geojson": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geo Plumes
+         * @description Plume outlines with their attributes (an empty collection if not analyzed).
+         */
+        get: operations["geo_plumes_api_geo__key__plumes_geojson_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/colormaps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Colormaps
+         * @description Each colormap sampled at 11 stops, as hex colours, for legends.
+         */
+        get: operations["colormaps_api_colormaps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -261,10 +405,67 @@ export interface components {
             /** File */
             file: string;
         };
+        /** GeoScene */
+        GeoScene: {
+            /** Key */
+            key: string;
+            /** Sensor */
+            sensor: string;
+            /** Title */
+            title: string;
+            /** Bounds */
+            bounds: number[] | null;
+            /** Mineral Scene */
+            mineral_scene: string | null;
+            /** Gas Scene */
+            gas_scene: string | null;
+            /** Mapped */
+            mapped: boolean;
+            /** Analyzed */
+            analyzed: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** LayerInfo */
+        LayerInfo: {
+            /** Id */
+            id: string;
+            /** Scene */
+            scene: string;
+            /** Name */
+            name: string;
+            /** Title */
+            title: string;
+            /** Group */
+            group: string;
+            /** Kind */
+            kind: string;
+            /** Units */
+            units: string;
+            /** Colormap */
+            colormap: string;
+            /** Rescale */
+            rescale: number[];
+            /** Legend */
+            legend: components["schemas"]["LegendItem"][];
+            /** Ready */
+            ready: boolean;
+            /** Buildable */
+            buildable: boolean;
+            /** Note */
+            note: string;
+        };
+        /** LegendItem */
+        LegendItem: {
+            /** Code */
+            code: number;
+            /** Label */
+            label: string;
+            /** Rgb */
+            rgb: number[];
         };
         /** ValidationError */
         ValidationError: {
@@ -289,6 +490,26 @@ export interface components {
 export type $defs = Record<string, never>;
 export interface operations {
     index__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+        };
+    };
+    legacy_page_legacy_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -703,6 +924,185 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_scene_list_api_geo_scenes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoScene"][];
+                };
+            };
+        };
+    };
+    geo_layers_api_geo__key__layers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayerInfo"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tile_api_tiles__layer_id___z___x___y__png_get: {
+        parameters: {
+            query?: {
+                rescale?: string | null;
+                colormap?: string | null;
+            };
+            header?: never;
+            path: {
+                layer_id: string;
+                z: number;
+                x: number;
+                y: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_values_api_geo__key__values_get: {
+        parameters: {
+            query: {
+                lat: number;
+                lon: number;
+            };
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number | string | null;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_plumes_api_geo__key__plumes_geojson_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    colormaps_api_colormaps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string[];
+                    };
                 };
             };
         };

@@ -75,3 +75,37 @@ td.num, th.num { font-variant-numeric: tabular-nums; text-align: right; }
 tr.clickable { cursor: pointer; }
 tr.sel td { background: var(--window); }
 .plume-detail { margin-top: 10px; font-size: 13px; }
+
+/* --- map workspace (Phase V1) --- */
+html, body, #root { height: 100%; }
+.app { display: flex; flex-direction: column; height: 100%; }
+header .basemap { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+.workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 30vw); }
+@media (max-width: 860px) {
+  .workspace { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+}
+.map { width: 100%; height: 100%; min-height: 320px; }
+.sidebar { display: flex; flex-direction: column; min-height: 0; background: var(--panel);
+           border-left: 1px solid var(--line); }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; padding: 10px 8px;
+               color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-body { flex: 1; overflow: auto; padding: 12px 14px; }
+.tab-body .panel { border: 0; padding: 0; background: transparent; }
+.layers { display: flex; flex-direction: column; gap: 6px; }
+.layer { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.layer.off { opacity: .7; }
+.layer-row { display: flex; align-items: center; gap: 6px; }
+.layer-row .layer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-row button { padding: 0 6px; font-size: 12px; }
+.tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 0 6px; }
+.layer-body { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.layer-body label { display: flex; align-items: center; gap: 8px; }
+.layer-body input[type="range"] { flex: 1; }
+.stretch { display: flex; gap: 6px; align-items: center; }
+.stretch input { width: 80px; }
+.ramp-bar { height: 10px; border-radius: 3px; }
+.ramp-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+table.values td { padding: 3px 4px; }
+.maplibregl-ctrl-attrib { font-size: 10px; }

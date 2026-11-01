@@ -124,6 +124,29 @@ src/specret/viewer/
 
 ### Phase V1: Map and layers (1–2 weeks)
 
+**Status (2026-11-01): done.**
+- **Server:**
+  - `viewer/layers.py`: scene registry keyed by EMIT scene id, AVIRIS stem or AVIRIS-NG line id; layers for minerals, gas, reference and context;
+  - `viewer/tiles.py`: rio-tiler XYZ tiles, nearest-neighbour, cached;
+  - endpoints `/api/geo/scenes`, `/api/geo/{key}/layers`, `/api/geo/{key}/values`, `/api/geo/{key}/plumes.geojson`, `/api/tiles/...` and `/api/colormaps`, with Pydantic response models, so their bodies are typed from the schema.
+- **Built on first view and cached under `outputs/viewer/<key>/`:** true colour (about 4 s for EMIT) and EMIT L2B MIN groups.
+- **App:**
+  - MapLibre map, no basemap by default, with an opt-in OSM toggle;
+  - scene footprints: clicking another scene's footprint opens that scene, but inside the active scene clicks query pixels;
+  - plume outlines at every zoom, the selected plume highlighted, and plume rows flying to their source;
+  - Layers tab: visibility, opacity, order, colormap and stretch, legends;
+  - Pixel tab: every layer's value at the point, then the mineral identification;
+  - Plumes tab.
+- **Exit criteria, checked in the browser:**
+  - zoom to single 60 m pixels: yes;
+  - plume outlines at every zoom: yes;
+  - mineral groups and CH4 overlaid with opacity, on Cuprite: yes;
+  - no request leaves localhost with the basemap off: yes;
+  - phone-width layout: yes.
+- **Tests:** 4 pytest API tests on a synthetic scene, and 10 Vitest tests.
+- **Bundle:** MapLibre takes the main bundle to 377 kB gzipped.
+- **Left for V2:** categorical legends list every group the colour table defines, not only those present in the scene.
+
 - **Map:** MapLibre with a local tile endpoint (`viewer/tiles.py`) and a layer registry (`viewer/layers.py`) that lists, per scene, what can be shown:
 
   | Kind | Layers |

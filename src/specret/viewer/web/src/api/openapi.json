@@ -8,7 +8,27 @@
   "/": {
    "get": {
     "summary": "Index",
+    "description": "The React app (built into static/app), or the legacy page if it is not built.",
     "operationId": "index__get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "text/html": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/legacy": {
+   "get": {
+    "summary": "Legacy Page",
+    "description": "The original single-page viewer, kept until the React app reaches parity.",
+    "operationId": "legacy_page_legacy_get",
     "responses": {
      "200": {
       "description": "Successful Response",
@@ -576,6 +596,310 @@
      }
     }
    }
+  },
+  "/api/geo/scenes": {
+   "get": {
+    "summary": "Geo Scene List",
+    "description": "Every scene the map can show: its footprint and which kinds of layers it has.",
+    "operationId": "geo_scene_list_api_geo_scenes_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/GeoScene"
+         },
+         "type": "array",
+         "title": "Response Geo Scene List Api Geo Scenes Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/geo/{key}/layers": {
+   "get": {
+    "summary": "Geo Layers",
+    "description": "The layers of one scene, in drawing order (bottom first).",
+    "operationId": "geo_layers_api_geo__key__layers_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/LayerInfo"
+         },
+         "title": "Response Geo Layers Api Geo  Key  Layers Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/tiles/{layer_id}/{z}/{x}/{y}.png": {
+   "get": {
+    "summary": "Tile",
+    "description": "One 256 px Web Mercator tile. Layers built on first use (true colour, L2B MIN)\nare built by the first request, which takes a few seconds.",
+    "operationId": "tile_api_tiles__layer_id___z___x___y__png_get",
+    "parameters": [
+     {
+      "name": "layer_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Layer Id"
+      }
+     },
+     {
+      "name": "z",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Z"
+      }
+     },
+     {
+      "name": "x",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "X"
+      }
+     },
+     {
+      "name": "y",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Y"
+      }
+     },
+     {
+      "name": "rescale",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Rescale"
+      }
+     },
+     {
+      "name": "colormap",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Colormap"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/geo/{key}/values": {
+   "get": {
+    "summary": "Geo Values",
+    "description": "Each ready layer's value at a location (categorical layers give their label).",
+    "operationId": "geo_values_api_geo__key__values_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     },
+     {
+      "name": "lat",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "number",
+       "title": "Lat"
+      }
+     },
+     {
+      "name": "lon",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "number",
+       "title": "Lon"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": {
+          "anyOf": [
+           {
+            "type": "number"
+           },
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "title": "Response Geo Values Api Geo  Key  Values Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/geo/{key}/plumes.geojson": {
+   "get": {
+    "summary": "Geo Plumes",
+    "description": "Plume outlines with their attributes (an empty collection if not analyzed).",
+    "operationId": "geo_plumes_api_geo__key__plumes_geojson_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Geo Plumes Api Geo  Key  Plumes Geojson Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/colormaps": {
+   "get": {
+    "summary": "Colormaps",
+    "description": "Each colormap sampled at 11 stops, as hex colours, for legends.",
+    "operationId": "colormaps_api_colormaps_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": {
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         },
+         "type": "object",
+         "title": "Response Colormaps Api Colormaps Get"
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
@@ -594,6 +918,78 @@
     ],
     "title": "Body_field_api_field_post"
    },
+   "GeoScene": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "sensor": {
+      "type": "string",
+      "title": "Sensor"
+     },
+     "title": {
+      "type": "string",
+      "title": "Title"
+     },
+     "bounds": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "number"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bounds"
+     },
+     "mineral_scene": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mineral Scene"
+     },
+     "gas_scene": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Gas Scene"
+     },
+     "mapped": {
+      "type": "boolean",
+      "title": "Mapped"
+     },
+     "analyzed": {
+      "type": "boolean",
+      "title": "Analyzed"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "sensor",
+     "title",
+     "bounds",
+     "mineral_scene",
+     "gas_scene",
+     "mapped",
+     "analyzed"
+    ],
+    "title": "GeoScene"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -606,6 +1002,111 @@
     },
     "type": "object",
     "title": "HTTPValidationError"
+   },
+   "LayerInfo": {
+    "properties": {
+     "id": {
+      "type": "string",
+      "title": "Id"
+     },
+     "scene": {
+      "type": "string",
+      "title": "Scene"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "title": {
+      "type": "string",
+      "title": "Title"
+     },
+     "group": {
+      "type": "string",
+      "title": "Group"
+     },
+     "kind": {
+      "type": "string",
+      "title": "Kind"
+     },
+     "units": {
+      "type": "string",
+      "title": "Units"
+     },
+     "colormap": {
+      "type": "string",
+      "title": "Colormap"
+     },
+     "rescale": {
+      "items": {
+       "type": "number"
+      },
+      "type": "array",
+      "title": "Rescale"
+     },
+     "legend": {
+      "items": {
+       "$ref": "#/components/schemas/LegendItem"
+      },
+      "type": "array",
+      "title": "Legend"
+     },
+     "ready": {
+      "type": "boolean",
+      "title": "Ready"
+     },
+     "buildable": {
+      "type": "boolean",
+      "title": "Buildable"
+     },
+     "note": {
+      "type": "string",
+      "title": "Note"
+     }
+    },
+    "type": "object",
+    "required": [
+     "id",
+     "scene",
+     "name",
+     "title",
+     "group",
+     "kind",
+     "units",
+     "colormap",
+     "rescale",
+     "legend",
+     "ready",
+     "buildable",
+     "note"
+    ],
+    "title": "LayerInfo"
+   },
+   "LegendItem": {
+    "properties": {
+     "code": {
+      "type": "integer",
+      "title": "Code"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "rgb": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Rgb"
+     }
+    },
+    "type": "object",
+    "required": [
+     "code",
+     "label",
+     "rgb"
+    ],
+    "title": "LegendItem"
    },
    "ValidationError": {
     "properties": {

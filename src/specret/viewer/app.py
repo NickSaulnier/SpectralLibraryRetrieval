@@ -10,6 +10,7 @@ lists the feature evidence for each match. Everything, Plotly included, is serve
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -19,10 +20,13 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from specret.scene import jobs
 from specret.scene.mapper import SceneMap
 from specret.scene.outputs import group_codes, group_colors
+from specret.viewer import layers as layers_mod
+from specret.viewer import tiles as tiles_mod
 from specret.workspace import UNKNOWN_BELOW, Workspace, jsonable
 
 STATIC = Path(__file__).parent / "static"  # app/ holds the React build of viewer/web (committed)
@@ -127,6 +131,7 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         if status["state"] == "done":
             scene_map.cache_clear()
             ortho_layers.cache_clear()
+            geo_scenes.cache_clear()
         if status.get("error"):
             status["error"] = status["error"].splitlines()[0]
         return status
@@ -318,7 +323,158 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
 
+    # --- map: scenes, layers, tiles (Phase V1) ----------------------------------------
+
+    @lru_cache(maxsize=1)
+    def geo_scenes() -> dict:
+        return {e.key: e for e in layers_mod.scene_entries(ws)}
+
+    def entry(key: str):
+        e = geo_scenes().get(key)
+        if e is None:
+            geo_scenes.cache_clear()
+            e = geo_scenes().get(key)
+        if e is None:
+            raise HTTPException(404, f"unknown scene '{key}'")
+        return e
+
+    def layer_of(layer_id: str) -> layers_mod.Layer:
+        key = layer_id.rsplit(".", 1)[0]
+        for layer in layers_mod.scene_layers(ws, entry(key)):
+            if layer.id == layer_id:
+                return layer
+        raise HTTPException(404, f"unknown layer '{layer_id}'")
+
+    @app.get("/api/geo/scenes")
+    def geo_scene_list() -> list[GeoScene]:
+        """Every scene the map can show: its footprint and which kinds of layers it has."""
+        out = []
+        for e in geo_scenes().values():
+            mapped = (
+                bool(e.mineral_scene) and (ws.map_dir(e.mineral_scene) / "scene_map.npz").exists()
+            )
+            analyzed = bool(e.gas_dir) and (e.gas_dir / "plumes.csv").exists()
+            out.append(
+                GeoScene(
+                    key=e.key,
+                    sensor=e.sensor,
+                    title=e.title,
+                    bounds=list(e.bounds) if e.bounds else None,
+                    mineral_scene=e.mineral_scene,
+                    gas_scene=e.gas_scene,
+                    mapped=mapped,
+                    analyzed=analyzed,
+                )
+            )
+        return out
+
+    @app.get("/api/geo/{key}/layers")
+    def geo_layers(key: str) -> list[LayerInfo]:
+        """The layers of one scene, in drawing order (bottom first)."""
+        return [LayerInfo(**layer.public()) for layer in layers_mod.scene_layers(ws, entry(key))]
+
+    @app.get("/api/tiles/{layer_id}/{z}/{x}/{y}.png")
+    def tile(
+        layer_id: str,
+        z: int,
+        x: int,
+        y: int,
+        rescale: str | None = None,
+        colormap: str | None = None,
+    ) -> Response:
+        """One 256 px Web Mercator tile. Layers built on first use (true colour, L2B MIN)
+        are built by the first request, which takes a few seconds."""
+        layer = layer_of(layer_id)
+        if layer.path is None or not layer.path.exists():
+            if layer.build is None:
+                raise HTTPException(404, f"{layer_id} has no data")
+            try:
+                layer.build()
+            except Exception as exc:  # reported to the map as a missing layer
+                raise HTTPException(500, f"could not build {layer_id}: {exc}") from None
+        rng = layer.rescale
+        if rescale:
+            try:
+                lo, hi = (float(v) for v in rescale.split(","))
+                rng = (lo, hi)
+            except ValueError:
+                raise HTTPException(400, "rescale is lo,hi") from None
+        cmap = colormap or layer.colormap
+        if cmap not in tiles_mod.COLORMAPS:
+            raise HTTPException(400, f"colormap must be one of {tiles_mod.COLORMAPS}")
+        png = tiles_mod.render(layer.path, layer.kind, z, x, y, rng, cmap)
+        return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=300"})
+
+    @app.get("/api/geo/{key}/values")
+    def geo_values(key: str, lat: float, lon: float) -> dict[str, float | str | None]:
+        """Each ready layer's value at a location (categorical layers give their label)."""
+        out: dict[str, float | str | None] = {}
+        for layer in layers_mod.scene_layers(ws, entry(key)):
+            if layer.kind == "rgb" or layer.path is None or not layer.path.exists():
+                continue
+            v = tiles_mod.point_value(layer.path, lon, lat)
+            if layer.kind == "categorical" and v is not None:
+                label = next((e["label"] for e in layer.legend if e["code"] == int(v)), None)
+                out[layer.id] = label
+            else:
+                out[layer.id] = v
+        return out
+
+    @app.get("/api/geo/{key}/plumes.geojson")
+    def geo_plumes(key: str) -> dict:
+        """Plume outlines with their attributes (an empty collection if not analyzed)."""
+        e = entry(key)
+        path = e.gas_dir / "plumes.geojson" if e.gas_dir else None
+        if path is None or not path.exists():
+            return {"type": "FeatureCollection", "features": []}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/api/colormaps")
+    def colormaps() -> dict[str, list[str]]:
+        """Each colormap sampled at 11 stops, as hex colours, for legends."""
+        from rio_tiler.colormap import cmap
+
+        out = {}
+        for name in tiles_mod.COLORMAPS:
+            cm = cmap.get(name)
+            stops = (cm[int(i)][:3] for i in np.linspace(0, 255, 11))
+            out[name] = ["#" + "".join(f"{c:02x}" for c in rgb) for rgb in stops]
+        return out
+
     return app
+
+
+class GeoScene(BaseModel):
+    key: str
+    sensor: str
+    title: str
+    bounds: list[float] | None
+    mineral_scene: str | None
+    gas_scene: str | None
+    mapped: bool
+    analyzed: bool
+
+
+class LegendItem(BaseModel):
+    code: int
+    label: str
+    rgb: list[int]
+
+
+class LayerInfo(BaseModel):
+    id: str
+    scene: str
+    name: str
+    title: str
+    group: str
+    kind: str
+    units: str
+    colormap: str
+    rescale: list[float]
+    legend: list[LegendItem]
+    ready: bool
+    buildable: bool
+    note: str
 
 
 @lru_cache(maxsize=1)

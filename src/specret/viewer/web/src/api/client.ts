@@ -1,4 +1,4 @@
-import type { paths } from "./schema";
+import type { components, paths } from "./schema";
 import type {
   GasPlumes,
   GasScene,
@@ -10,6 +10,8 @@ import type {
 } from "./types";
 
 type Path = keyof paths;
+export type GeoScene = components["schemas"]["GeoScene"];
+export type LayerInfo = components["schemas"]["LayerInfo"];
 
 /** Fill a typed route template ("/api/map/{scene_id}") with its parameters. */
 export function route<P extends Path>(path: P, params: Record<string, string | number> = {}): string {
@@ -65,6 +67,19 @@ export const api = {
   gasMapUrl: (sceneId: string, gas: string) =>
     route("/api/gas/{scene_id}/{gas}.png", { scene_id: sceneId, gas }),
   gasPlumes: (sceneId: string) => json<GasPlumes>(route("/api/gas/{scene_id}/plumes", { scene_id: sceneId })),
+  geoScenes: () => json<GeoScene[]>(route("/api/geo/scenes")),
+  layers: (key: string) => json<LayerInfo[]>(route("/api/geo/{key}/layers", { key })),
+  values: (key: string, lat: number, lon: number) =>
+    json<Record<string, number | string | null>>(`${route("/api/geo/{key}/values", { key })}?${query({ lat, lon })}`),
+  plumesGeojson: (key: string) =>
+    json<GeoJSON.FeatureCollection>(route("/api/geo/{key}/plumes.geojson", { key })),
+  colormaps: () => json<Record<string, string[]>>(route("/api/colormaps")),
+  /** MapLibre tile template for a layer, with its current stretch and colormap. */
+  tileUrl: (layerId: string, rescale: [number, number], colormap: string) =>
+    `${location.origin}/api/tiles/${encodeURIComponent(layerId)}/{z}/{x}/{y}.png?${query({
+      rescale: rescale.join(","),
+      colormap,
+    })}`,
   plume: (sceneId: string, plumeId: number) =>
     json<PlumeExplanation>(
       route("/api/gas/{scene_id}/plume/{plume_id}", { scene_id: sceneId, plume_id: plumeId }),

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5",
+    "maplibre-gl": "^5",
     "plotly.js-basic-dist-min": "^3",
     "react": "^19",
     "react-dom": "^19"
@@ -20,6 +21,7 @@
     "@testing-library/dom": "^10",
     "@testing-library/jest-dom": "^6",
     "@testing-library/react": "^16",
+    "@types/geojson": "^7946.0.16",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
