@@ -69,8 +69,9 @@ def loo_shrinkage(d, n, alphas=LOO_ALPHAS):
     return a[nll.argmin(dim=1)]
 
 
-def _filter_chunk(x, keep, finite, kk, shrinkage, min_n):
-    """One pass for a chunk of columns. x: (c, R, B); keep, finite: (c, R); kk: (c, B)."""
+def _filter_chunk(x, keep, finite, kk, shrinkage, min_n, offset=None):
+    """One pass for a chunk of columns. x: (c, R, B); keep, finite: (c, R); kk: (c, B).
+    The target is t = offset - mu * kk (offset 0 for reflected sunlight)."""
     import torch
 
     w = keep.to(x.dtype)
@@ -87,7 +88,7 @@ def _filter_chunk(x, keep, finite, kk, shrinkage, min_n):
     eye = torch.eye(x.shape[2], dtype=x.dtype, device=x.device)
     cov = (1 - shrink)[:, None, None] * s + shrink[:, None, None] * diag
     cov = cov + (~ok)[:, None, None] * eye  # keep empty columns solvable
-    t = -mu * kk
+    t = -mu * kk if offset is None else offset - mu * kk
     sinv_t = torch.linalg.solve(cov, t[..., None])[..., 0]  # (c, B)
     norm = (t * sinv_t).sum(dim=-1)
     a = ((x - mu[:, None, :]) @ sinv_t[..., None])[..., 0] / norm[:, None]  # (c, R)
@@ -106,6 +107,7 @@ def column_matched_filter(
     min_pixels_factor: float = 2.0,
     device: str | None = None,
     chunk: int = 64,
+    offset: np.ndarray | None = None,
 ) -> MatchedFilterResult:
     """Enhancement for every pixel of `radiance` (rows, cols, bands).
 
@@ -113,12 +115,16 @@ def column_matched_filter(
     `valid` (rows, cols) marks pixels usable for statistics; pixels with any NaN band are never
     used. Columns with fewer than min_pixels_factor * bands usable pixels are left as NaN.
     `shrinkage` is a fixed value in [0, 1] or "loo" for leave-one-out selection per column.
+    `offset` ((bands,) or (cols, bands)) makes the target t = offset - mu * k, for thermal
+    emission where the plume's signal is set by its contrast with the background (gas/lwir.py).
     """
     import torch
 
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     rows, cols, nb = radiance.shape
     k = np.broadcast_to(np.asarray(k, dtype=np.float64), (cols, nb))
+    if offset is not None:
+        offset = np.broadcast_to(np.asarray(offset, dtype=np.float64), (cols, nb))
     valid = np.ones((rows, cols), dtype=bool) if valid is None else np.asarray(valid, dtype=bool)
     min_n = max(min_pixels_factor * nb, nb + 2)
     alpha = np.full((rows, cols), np.nan, dtype=np.float32)
@@ -135,10 +141,15 @@ def column_matched_filter(
         usable = finite & torch.as_tensor(np.ascontiguousarray(valid[:, sl].T), device=dev)
         xc = torch.nan_to_num(xc, nan=0.0)
         kk = torch.as_tensor(np.array(k[sl], dtype=np.float64), device=dev)
+        off = (
+            None
+            if offset is None
+            else torch.as_tensor(np.array(offset[sl], dtype=np.float64), device=dev)
+        )
         keep = usable
         for _ in range(n_pass):
             used = keep
-            a, n, shrink, mu = _filter_chunk(xc, used, finite, kk, shrinkage, min_n)
+            a, n, shrink, mu = _filter_chunk(xc, used, finite, kk, shrinkage, min_n, off)
             # Robust background spread per column, from the pixels the statistics used
             bg = torch.where(used, a, torch.full_like(a, float("nan")))
             med = torch.nanmedian(bg, dim=1).values

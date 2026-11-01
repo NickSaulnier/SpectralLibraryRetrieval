@@ -72,6 +72,14 @@ gases:
     lwir: [[9400, 10100]]
     quantify: []
 
+  C2H4:
+    # Ethylene: petrochemical plants and flares. Its 10.5 µm band overlaps NH3's. (SF6 would
+    # overlap too, but HITRAN serves it only as cross-sections, which are not fetched.)
+    hitran_id: 38
+    molar_mass: 28.05
+    vswir: []
+    lwir: [[10200, 11000]]
+    quantify: [lwir]
 # Wavenumber ranges fetched from HITRAN (cm^-1), with a margin around each sensor range.
 hitran_ranges_cm1:
   vswir: [3950, 6700]   # 1.49-2.53 µm

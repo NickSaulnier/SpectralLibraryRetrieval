@@ -319,6 +319,20 @@ def _gas(ws) -> list[Item]:
             hint="specret detect-plumes <scene id> analyzes one (about 1-2 min)",
         )
     )
+    from specret.io.hytes import flights
+
+    hytes = flights()
+    done_h = [f for f in hytes if (Path("outputs/gas/hytes") / f / "candidates.csv").exists()]
+    items.append(
+        Item(
+            "hytes",
+            "optional",
+            "HyTES flights (LWIR gas)",
+            bool(hytes),
+            f"{len(hytes)} flights, {len(done_h)} analyzed" if hytes else "none",
+            hint="uv run python scripts/download_g0_hytes.py; then specret detect-plumes-lwir",
+        )
+    )
     model = CALIBRATION / "gas_emit.json"
     items.append(
         Item(

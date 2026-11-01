@@ -48,6 +48,7 @@ One entry per source: where it came from, version, when it was fetched, and its 
 - **Source:** hitran.org through HAPI (`hitran-api`), no login. All isotopologues; 3950–6700 cm⁻¹ (VSWIR) and 750–1400 cm⁻¹ (LWIR), for the gases and ranges in `configs/gases.yaml`
 - **Fetched:** 2026-10-31, with `specret download hitran`, ~180 MB. C2H6 has no lines in the VSWIR range; its 1.68 and 2.3 µm features need the HITRAN cross-section files
 - **Licence:** free to use; cite Gordon et al. (2022), JQSRT 277, 107949, and HAPI, Kochanov et al. (2016), JQSRT 177, 15
+- **Added 2026-11-01:** C2H4 LWIR lines (`specret download hitran --gases C2H4`). SF6 has no line list through HAPI (HITRAN serves it as cross-sections), so it is not used.
 - **Location:** `data/raw/hitran/` (HAPI `.data` and `.header` tables)
 
 ### Wind (for emission rates)

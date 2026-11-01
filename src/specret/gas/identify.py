@@ -185,10 +185,16 @@ def identify(
     seed: int = 0,
     named: tuple[str, ...] = ("CH4", "CO2"),
     flag_penalty: float = 3.0,
+    nuisance_gases: tuple[str, ...] = ("H2O",),
+    top_n: int | None = None,
 ) -> Identification:
     """Fit the candidate. Only `named` gases can be the identified gas; other gases enter the
-    fit at `flag_penalty` times the BIC penalty and are reported as "consistent with", and H2O
-    is a nuisance term (a wetter or drier column) that is never named."""
+    fit at `flag_penalty` times the BIC penalty and are reported as "consistent with", and
+    `nuisance_gases` (H2O: a wetter or drier column; O3 in the LWIR) are never named.
+
+    With `top_n`, gases are first retrieved: ranked by whitened correlation with the plume's
+    mean residual, and only the best `top_n` (plus the nuisance gases) enter the fit. This is
+    the library-search step for the LWIR, where many gases overlap (PLAN_GAS.md G4)."""
     use = ctx.usable[cand.rows, cand.cols]
     y_bar = np.nanmean(ctx.y[cand.rows[use], cand.cols[use]], axis=0).astype(np.float64)
     null = null_means(ctx, cand, n_null, seed + cand.id)
@@ -199,23 +205,33 @@ def identify(
     z = W @ (y_bar - m)
     base = W @ baseline_matrix(ctx.centers_nm, ctx.windows)
     gas_cols = {g: W @ (-k) for g, k in ctx.gas_k.items()}
+    if top_n is not None:
+        # Retrieve: rank by the correlation of each whitened signature with the residual
+        zr = z - base[:, ::2] @ np.linalg.lstsq(base[:, ::2], z, rcond=None)[0]
+        corr = {
+            g: float(c @ zr / (np.linalg.norm(c) * np.linalg.norm(zr) + 1e-30))
+            for g, c in gas_cols.items()
+            if g not in nuisance_gases
+        }
+        keep = set(sorted(corr, key=corr.get, reverse=True)[:top_n]) | set(nuisance_gases)
+        gas_cols = {g: c for g, c in gas_cols.items() if g in keep}
     conf_cols = {f"confuser:{n}": W @ s for n, s in ctx.confusers.items()}
     bic = np.log(nb)
     penalty = {
-        t: bic * (1 if t in named or t == "H2O" or t in conf_cols else flag_penalty)
+        t: bic * (1 if t in named or t in nuisance_gases or t in conf_cols else flag_penalty)
         for t in [*gas_cols, *conf_cols]
     }
 
     chosen, coef, chi2 = _greedy({**gas_cols, **conf_cols}, z, base, max_terms, penalty)
     chi2_base, _ = _chi2(np.zeros((nb, 0)), z, base)
-    nuisance = {t: c for t, c in gas_cols.items() if t not in named and t in ("H2O",)}
+    nuisance = {t: c for t, c in gas_cols.items() if t in nuisance_gases}
     _, _, chi2_conf = _greedy({**conf_cols, **nuisance}, z, base, max_terms, penalty)
     terms = dict(zip(chosen, map(float, coef), strict=True))
 
     A = np.column_stack([({**gas_cols, **conf_cols})[t] for t in chosen]) if chosen else None
     gas_z = {}
     for j, t in enumerate(chosen):
-        if t in gas_cols and t != "H2O":
+        if t in gas_cols and t not in nuisance_gases:
             gas_z[t] = _ls_z(A, z, base, j)[1]
     named_z = {g: v for g, v in gas_z.items() if g in named and v > 0}
     gas = max(named_z, key=named_z.get) if named_z else None
@@ -240,7 +256,7 @@ def identify(
         d = window_alpha[0] - window_alpha[1]
         consistency = float(abs(d) / np.hypot(window_sd[0], window_sd[1]))
 
-    flags = [t for t in chosen if t in gas_cols and t not in named and t != "H2O"]
+    flags = [t for t in chosen if t in gas_cols and t not in named and t not in nuisance_gases]
     if gas is not None:
         verdict = gas
     elif flags:
@@ -253,7 +269,7 @@ def identify(
         verdict = "no signal"
     features = {
         "mf_z": cand.peak_z,
-        "gas_z": gas_z.get(focus, _ls_z(gas_cols[focus][:, None], z, base, 0)[1]),
+        "gas_z": gas_z.get(focus, _ls_z((W @ -ctx.gas_k[focus])[:, None], z, base, 0)[1]),
         "coherence": coherence(ctx.alpha, cand),
         "vs_confusers": float(np.log1p(max(chi2_conf - chi2, 0.0))),
         "consistency": consistency,

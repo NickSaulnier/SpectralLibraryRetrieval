@@ -109,13 +109,13 @@ def _merra2_day(path: str):
     import xarray as xr
 
     with xr.open_dataset(path) as ds:
-        return ds[["U10M", "V10M"]].load()
+        return ds[["U10M", "V10M", "T2M"]].load()
 
 
 def wind_merra2(lat: float, lon: float, t: datetime, out_dir: Path = MERRA2_DIR) -> Wind:
     t = _utc(t)
     ds = _merra2_day(str(merra2_file(t, out_dir)))
-    p = ds.interp(
+    p = ds[["U10M", "V10M"]].interp(
         lat=lat, lon=lon, time=np.datetime64(t.replace(tzinfo=None)), kwargs={"fill_value": None}
     )
     return Wind(float(p["U10M"]), float(p["V10M"]), "MERRA-2")
@@ -140,3 +140,13 @@ def wind_at(
     if len(winds) > 1:
         best.source = f"{best.source} (vs {winds[1].source} {winds[1].speed:.2f} m/s)"
     return best
+
+
+def air_temperature(lat: float, lon: float, t: datetime, out_dir: Path = MERRA2_DIR) -> float:
+    """MERRA-2 2 m air temperature (K) at a point and time."""
+    t = _utc(t)
+    ds = _merra2_day(str(merra2_file(t, out_dir)))
+    p = ds["T2M"].interp(
+        lat=lat, lon=lon, time=np.datetime64(t.replace(tzinfo=None)), kwargs={"fill_value": None}
+    )
+    return float(p)

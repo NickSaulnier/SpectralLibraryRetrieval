@@ -120,6 +120,7 @@ src/specret/
     detect.py                 # scene pipeline: windows, targets, screens, matched filter, outputs
     pipeline.py               # G2/G3 scene analysis: maps, candidates, identification, plume records
     tools.py                  # read-side helpers for MCP and the viewer (list, explain, requantify)
+    lwir.py                   # G4 HyTES: thermal-contrast target, contrast mask, merge, identify, inject
     signatures.py             # unit absorption spectra per scene: VSWIR (AMF, H2O LUT), LWIR (thermal contrast)
     matched_filter.py         # column-wise robust mean/cov (torch), MF, ACE, two-pass plume exclusion
     identify.py               # joint multi-gas + confuser fit, BIC selection, calibrated confidence
@@ -293,6 +294,22 @@ Still open:
 - An agent can answer "is anything leaking here, what is it, and how much?" through MCP.
 
 ### Phase G4: LWIR (HyTES) (3–5 weeks)
+
+**Status (2026-11-01): built; 2 of 3 exit criteria pass, and the third is met on 2 of 3 flights.** Details in `results/gas_g4_lwir.md`.
+- **Built:**
+  - `io/hytes.py`;
+  - the LWIR line-by-line cache (C2H4 added; SF6 is not available as lines);
+  - `gas/lwir.py`, which has the thermal-contrast matched filter with per-pixel contrast correction, the low-contrast mask, candidates merged across gases, retrieve-then-fit identification, and thermal injection;
+  - `eval/gas_lwir_benchmark.py`;
+  - the `detect-plumes-lwir` command.
+- **Injected plumes:** identification is 93.6% at SNR ≥ 5, with no cross-gas confusion.
+- **Low-contrast mask:** works.
+- **Published gases:**
+  - Salton Sea NH3 at the mud pots: correct;
+  - Chino NH3: named, but below the confidence threshold;
+  - Kern River CH4: outranked by SO2, NH3 and N2O calls, probably surface emissivity with no TIR confuser terms available.
+- **Fixed on the way:** linearly dependent ozone bands (9.4–9.9 µm excluded), and a heavy-tailed thermal background (stricter candidate thresholds).
+- **Not done:** LWIR emission rates (no U_eff for HyTES resolution), TIR mineral confusers, cross-section gases, MCP and viewer for HyTES.
 
 - **Data and sensors:** `io/hytes.py`, `configs/sensors/hytes.yaml`, and LWIR bad bands.
 - **Library:** `gas/library.py` gains HITRAN cross-sections, resampled with the existing resampler at the HyTES band centres and FWHM.

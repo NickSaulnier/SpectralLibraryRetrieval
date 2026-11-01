@@ -434,6 +434,18 @@ def cmd_quantify(args: argparse.Namespace) -> None:
     print(f"  Q = {q['q_kg_h']:,.0f} +/- {q['sigma_q_kg_h']:,.0f} kg/h  ({budget})")
 
 
+def cmd_detect_plumes_lwir(args: argparse.Namespace) -> None:
+    from specret.gas.lwir import analyze_flight, write_flight
+    from specret.io.hytes import open_hytes
+
+    for name in args.flights:
+        f = open_hytes(name)
+        rows = slice(args.rows[0], args.rows[1]) if args.rows else None
+        df, maps = analyze_flight(f, args.plume_temperature, rows)
+        folder = write_flight(f, df, maps, args.out)
+        print(f"{f.name}: {len(df)} candidates -> {folder}")
+
+
 def cmd_compare_ghg(args: argparse.Namespace) -> None:
     import json
 
@@ -939,6 +951,20 @@ def main(argv: list[str] | None = None) -> None:
     dp.add_argument("--show", type=int, default=10, help="plumes to print per scene")
     dp.add_argument("--out", default="outputs/gas")
     dp.set_defaults(func=cmd_detect_plumes)
+
+    dl = sub.add_parser(
+        "detect-plumes-lwir",
+        help="find and identify gas plumes in HyTES thermal-infrared flights",
+        description="LWIR matched filter per gas with the thermal-contrast target, candidates "
+        "merged across gases, and library identification (retrieve, then joint fit). Plume "
+        "temperature defaults to the MERRA-2 2 m air temperature. Writes candidates.csv, "
+        "plumes.csv, plumes.geojson and enhancement.npz to outputs/gas/hytes/<flight>/.",
+    )
+    dl.add_argument("flights", nargs="+", help="HyTES flight names (or part), e.g. SaltonSea")
+    dl.add_argument("--plume-temperature", type=float, help="plume temperature in K")
+    dl.add_argument("--rows", nargs=2, type=int, metavar=("START", "STOP"))
+    dl.add_argument("--out", default="outputs/gas/hytes")
+    dl.set_defaults(func=cmd_detect_plumes_lwir)
 
     qp = sub.add_parser(
         "quantify",

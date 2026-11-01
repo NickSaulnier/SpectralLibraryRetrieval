@@ -66,3 +66,24 @@ quantify:
   # Relative IME error not captured by the shifted-mask background: the spread of measured IME
   # against the true mass inside the mask on injected CH4 plumes (results/gas_g3_quantification.md)
   retrieval_rel_sd: 0.3
+
+# LWIR (HyTES) plume detection (gas/lwir.py)
+lwir:
+  window_nm: [7550, 11950]   # HyTES bands used; the detector edges are noisy
+  # The 9.4-9.9 µm (ozone) bands of the HyTES L1 product are linearly dependent (an exact
+  # +/- combination of ~18 bands has zero variance), which a whitened filter would exploit as
+  # a noise-free direction. They are left out.
+  exclude_nm: [[9400, 9900]]
+  edge_columns: 16           # detector columns masked at each end (noisy; spurious candidates)
+  gases: [CH4, N2O, NH3, SO2, C2H6, C2H4]  # searched; H2O and O3 are nuisance terms
+  named: [CH4, N2O, NH3, SO2, C2H4]        # can be the identified gas (C2H6 is flag-only)
+  nuisance: [H2O, O3]
+  retrieve_top_n: 3          # gases kept for the joint fit after ranking by whitened correlation
+  segment_rows: 2000         # along-track segment with its own column statistics
+  # Thermal backgrounds are heavy-tailed (surface emissivity structure: ~0.5% of pixels beyond
+  # 6 sigma), so candidates need a stronger seed than in the VSWIR
+  candidates: {z_high: 8.0, z_low: 3.0, min_px: 8}
+  sites:                     # used for air temperature when a flight has no geolocation
+    Dairy: [33.97, -117.62]  # Chino dairies, California
+  low_contrast_k: 1.0        # |T_plume - T_surface| below this: cannot detect, masked
+  plume_temperature: air     # "air" = MERRA-2 2 m temperature at the overpass

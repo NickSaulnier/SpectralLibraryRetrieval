@@ -145,13 +145,15 @@ def cross_sections(
     step: float = 0.01,
     wing: float = 25.0,
     hitran_dir: Path = HITRAN_DIR,
+    spectral_range: str = "vswir",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Voigt cross-sections (layers, n_nu) for `gas` from its cached VSWIR HITRAN table."""
+    """Voigt cross-sections (layers, n_nu) for `gas` from its cached HITRAN table for
+    `spectral_range` ("vswir" or "lwir")."""
     with _quiet():
         import hapi
 
         hapi.VARIABLES["BACKEND_DATABASE_NAME"] = str(hitran_dir)
-        table = f"{gas}_vswir"
+        table = f"{gas}_{spectral_range}"
         if table not in hapi.LOCAL_TABLE_CACHE:
             hapi.storage2cache(table)
         sub = f"_{gas}_{nu_lo:.0f}_{nu_hi:.0f}"
@@ -181,8 +183,54 @@ def cross_sections(
     return np.asarray(nu, dtype=np.float64), np.stack(rows)
 
 
-def window_path(lo_nm: float, hi_nm: float, cache_dir: Path = CACHE_DIR) -> Path:
-    return cache_dir / f"lbl_{lo_nm:.0f}_{hi_nm:.0f}nm.npz"
+def window_path(
+    lo_nm: float, hi_nm: float, cache_dir: Path = CACHE_DIR, spectral_range: str = "vswir"
+) -> Path:
+    prefix = "lbl" if spectral_range == "vswir" else f"lbl_{spectral_range}"
+    return cache_dir / f"{prefix}_{lo_nm:.0f}_{hi_nm:.0f}nm.npz"
+
+
+# LWIR plumes are seen from a low aircraft, with the atmosphere along the path taken from the
+# sensor's own products (HyTES ISAC), so only the near-surface layers are needed.
+LWIR_LAYER_EDGES_KM = np.array([0, 0.5, 1, 1.5, 2, 3.0])
+
+
+def build_lwir_window(
+    lo_nm: float,
+    hi_nm: float,
+    gases: list[str] | None = None,
+    cache_dir: Path = CACHE_DIR,
+    hitran_dir: Path = HITRAN_DIR,
+    force: bool = False,
+) -> LineByLine:
+    """Cross-sections of the LWIR gases (gases.yaml entries with lwir windows) near the
+    surface, cached as data/derived/gas/lbl_lwir_<lo>_<hi>nm.npz."""
+    path = window_path(lo_nm, hi_nm, cache_dir, "lwir")
+    cfg = load_gases()
+    gases = gases or [g for g, v in cfg["gases"].items() if v["lwir"] and v["hitran_id"]]
+    cached = LineByLine.load(path) if path.exists() and not force else None
+    if cached is not None and set(gases) <= set(cached.sigma):
+        return cached
+    lib = plume_config()["library"]
+    atm = standard_atmosphere(LWIR_LAYER_EDGES_KM)
+    cov_lo, cov_hi = cfg["hitran_ranges_cm1"]["lwir"]
+    nu_lo = max(1e7 / (hi_nm + 4 * lib["margin_nm"]), cov_lo)
+    nu_hi = min(1e7 / (lo_nm - 4 * lib["margin_nm"]), cov_hi)
+    sigma = dict(cached.sigma) if cached is not None else {}
+    nu = cached.nu_cm1 if cached is not None else None
+    for g in gases:
+        if g in sigma:
+            continue
+        if not (hitran_dir / f"{g}_lwir.data").exists():
+            print(f"skipped {g}: no LWIR HITRAN table (specret download hitran --gases {g})")
+            continue
+        print(f"line-by-line {g} (LWIR): {nu_lo:.0f}-{nu_hi:.0f} cm-1, {atm.n_layers} layers")
+        nu, sigma[g] = cross_sections(
+            g, nu_lo, nu_hi, atm, lib["step_cm1"], lib["wing_cm1"], hitran_dir, "lwir"
+        )
+    lbl = LineByLine(nu, sigma, atm)
+    lbl.save(path)
+    return lbl
 
 
 def lbl_ranges(windows: list[list[float]]) -> list[tuple[float, float]]:
