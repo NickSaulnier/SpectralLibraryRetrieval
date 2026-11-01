@@ -109,7 +109,7 @@ configs/
 src/specret/
   io/
     emit_l1b.py               # L1B RAD + OBS (geometry), same GLT orthorectify as emit.py
-    aviris_ng_rad.py          # AVIRIS-NG L1 radiance (ENVI) + OBS
+    avirisng.py               # AVIRIS-NG L1B radiance (ENVI, map grid) scattered to raw geometry via the GLT
     hytes.py                  # HyTES L1 radiance, L2 LST/emissivity
     emit_ghg.py               # EMIT L2B CH4ENH/CO2ENH rasters and CH4PLM/CO2PLM plume complexes (references)
     hitran.py                 # HAPI line-list fetch + cache -> data/raw/hitran/
@@ -121,6 +121,7 @@ src/specret/
     pipeline.py               # G2/G3 scene analysis: maps, candidates, identification, plume records
     tools.py                  # read-side helpers for MCP and the viewer (list, explain, requantify)
     lwir.py                   # G4 HyTES: thermal-contrast target, contrast mask, merge, identify, inject
+    persistence.py            # G5 multi-overpass persistence of plume sources
     signatures.py             # unit absorption spectra per scene: VSWIR (AMF, H2O LUT), LWIR (thermal contrast)
     matched_filter.py         # column-wise robust mean/cov (torch), MF, ACE, two-pass plume exclusion
     identify.py               # joint multi-gas + confuser fit, BIC selection, calibrated confidence
@@ -331,6 +332,16 @@ Still open:
 - The low-contrast mask suppresses detections where |ΔT| < 1 K.
 
 ### Phase G5: Hardening (optional, 1–2 weeks)
+
+**Status (2026-11-01): done for the items that need no new accounts.** Details in `results/gas_g5_hardening.md`.
+- **ISOFIT and sRTMnet: not needed.** Against EMIT's MODTRAN-based product, our scale holds within ±2% over 0–1.65 km elevation and 1.5–2.1 g/cm² water.
+- **AVIRIS-NG radiance:** `io/avirisng.py` scatters the map-grid radiance back into raw detector geometry through the GLT.
+  - Against the published CH4 map: r = 0.88–0.90 with the published method's 2.1–2.5 µm window. Our wider default keeps a better SNR (5.1 against 3.7).
+  - Injected recovery is 0.73. That gain, and the confidence model and U_eff, are not yet calibrated for this sensor.
+  - Found on the way: the OBS file swaps sun zenith and azimuth.
+- **Persistence:** `gas/persistence.py` and `gas-persistence`. On four Permian overpasses, 9 of the 57 covered plumes recur; that is too few to show a precision gain.
+- **Cross-sectional flux:** added as a second rate estimate (open question 3). It comes out at 0.62× the IME rate on average, and 0.47× for plumes of 100 px or more.
+- **Not done:** PRISMA and EnMAP (they need accounts).
 
 - **AVIRIS-NG and other VSWIR sensors:** add PRISMA and EnMAP radiance loaders. The configs exist or are cheap to add.
 - **Multi-overpass persistence:** the same source seen in several scenes raises confidence.

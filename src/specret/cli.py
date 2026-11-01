@@ -372,7 +372,12 @@ def cmd_detect_plumes(args: argparse.Namespace) -> None:
     from specret.io.emit_l1b import find_l1b, open_emit_l1b
 
     for s in args.scenes:
-        scene = open_emit_l1b(find_l1b(s))
+        if s.startswith("ang"):  # AVIRIS-NG flight line
+            from specret.io.avirisng import open_avirisng
+
+            scene = open_avirisng(s)
+        else:
+            scene = open_emit_l1b(find_l1b(s))
         if args.enhancement_only:
             enh = detect(scene, args.gas)
             path = write_enhancement(scene, enh, Path(args.out))
@@ -444,6 +449,24 @@ def cmd_detect_plumes_lwir(args: argparse.Namespace) -> None:
         df, maps = analyze_flight(f, args.plume_temperature, rows)
         folder = write_flight(f, df, maps, args.out)
         print(f"{f.name}: {len(df)} candidates -> {folder}")
+
+
+def cmd_gas_persistence(args: argparse.Namespace) -> None:
+    from specret.gas.persistence import load_scene, persistence
+    from specret.io.emit_l1b import find_l1b, open_emit_l1b
+
+    results = []
+    for s in args.scenes:
+        scene = open_emit_l1b(find_l1b(s))
+        results.append(load_scene(Path(args.out) / scene.scene_id, scene))
+    df = persistence(results, args.radius)
+    path = Path(args.out) / "persistence.csv"
+    df.to_csv(path, index=False)
+    covered = df[df["overpasses_covering"] > 0]
+    print(
+        f"{len(df)} plumes in {len(results)} scenes; {len(covered)} covered by another "
+        f"overpass, {int((covered['overpasses_seen'] > 0).sum())} seen again -> {path}"
+    )
 
 
 def cmd_compare_ghg(args: argparse.Namespace) -> None:
@@ -943,7 +966,9 @@ def main(argv: list[str] | None = None) -> None:
         "and candidates.csv to outputs/gas/<scene id>/. --enhancement-only writes one gas's "
         "enhancement map and stops.",
     )
-    dp.add_argument("scenes", nargs="+", help="EMIT scene ids or L1B RAD granule paths")
+    dp.add_argument(
+        "scenes", nargs="+", help="EMIT scene ids, L1B RAD paths, or AVIRIS-NG line ids (ang...)"
+    )
     dp.add_argument("--enhancement-only", action="store_true")
     dp.add_argument("--gas", default="CH4", choices=["CH4", "CO2"], help="with --enhancement-only")
     dp.add_argument("--wind", help="use this 10 m wind for every plume: U,V in m/s")
@@ -985,6 +1010,18 @@ def main(argv: list[str] | None = None) -> None:
     cg.add_argument("--out", default="outputs/gas", help="where detect-plumes wrote its maps")
     cg.add_argument("--json", help="write the metrics to this file")
     cg.set_defaults(func=cmd_compare_ghg)
+
+    gp = sub.add_parser(
+        "gas-persistence",
+        help="which plumes recur at the same place on other overpasses",
+        description="For scenes already run through detect-plumes, count for each plume the "
+        "other overpasses that imaged its source and those that saw the same gas within "
+        "--radius metres. Writes outputs/gas/persistence.csv.",
+    )
+    gp.add_argument("scenes", nargs="+", help="EMIT scene ids")
+    gp.add_argument("--radius", type=float, default=300.0, help="metres")
+    gp.add_argument("--out", default="outputs/gas")
+    gp.set_defaults(func=cmd_gas_persistence)
 
     gb = sub.add_parser(
         "gas-benchmark",

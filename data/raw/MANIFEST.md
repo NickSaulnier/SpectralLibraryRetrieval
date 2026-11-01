@@ -44,6 +44,20 @@ One entry per source: where it came from, version, when it was fetched, and its 
 - **Licence:** NASA open data, no restrictions
 - **Location:** `data/scenes/hytes/<flight>/`
 
+### AVIRIS-NG radiance and published CH4 maps (PLAN_GAS.md, Phase G5)
+- **Source:** ORNL DAAC:
+  - `AVIRIS-NG_L1B_radiance_2095`: L1B radiance, OBS, LOC and GLT; the radiance is on a rotated UTM map grid;
+  - `CH4_Plume_AVIRIS-NG_1727`: Duren et al. 2019, the California point-source survey, with one published CH4 matched-filter map per flight line.
+- **Flight line:** `ang20161001t205456`, 2.4 GB, fetched 2026-11-01 with the Earthdata login.
+- **Quirk:** this line's OBS file holds sun zenith and sun azimuth in each other's place despite its band names; `io/avirisng.py` detects it.
+- **Licence:** NASA open data, no restrictions.
+- **Location:** `data/scenes/avirisng/<line id>/`
+
+### EMIT repeat overpasses for persistence (Phase G5)
+- **Scenes:** `20230731T191822_2321213_014`, `20231020T192945_2329313_028` and `20240823T173410_2423611_025`, over the Permian scenes of 2023-06-08. They have L1B, L2A, CH4ENH, and CH4PLM where the catalogue has plume complexes (2023-10-20 has none).
+- **Fetched:** 2026-11-01.
+- **Location:** `data/scenes/emit_gas/<scene id>/`
+
 ### HITRAN line lists
 - **Source:** hitran.org through HAPI (`hitran-api`), no login. All isotopologues; 3950–6700 cm⁻¹ (VSWIR) and 750–1400 cm⁻¹ (LWIR), for the gases and ranges in `configs/gases.yaml`
 - **Fetched:** 2026-10-31, with `specret download hitran`, ~180 MB. C2H6 has no lines in the VSWIR range; its 1.68 and 2.3 µm features need the HITRAN cross-section files

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +37,10 @@ def scene_id(path: str | Path) -> str:
 
 
 def sibling(path: Path, product: str) -> Path | None:
-    """Another granule of the same scene in the same folder, e.g. product 'L1B_OBS'."""
+    """Another granule of the same scene in the same folder, e.g. product 'L1B_OBS'; None if
+    there is none (or `path` is not an EMIT granule)."""
+    if not SCENE_ID.search(Path(path).name):
+        return None
     hits = sorted(path.parent.glob(f"EMIT_{product}_*{scene_id(path)}*.nc"))
     return hits[0] if hits else None
 
@@ -64,6 +68,10 @@ class EmitL1B:
     @property
     def shape(self) -> tuple[int, int]:
         return self.radiance.shape[:2]
+
+    @property
+    def time(self) -> datetime:
+        return datetime.strptime(self.scene_id.split("_")[0], "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
 
     def band_indices(self, lo_nm: float, hi_nm: float) -> np.ndarray:
         return np.flatnonzero((self.centers_nm >= lo_nm) & (self.centers_nm <= hi_nm))

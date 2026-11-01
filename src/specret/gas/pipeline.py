@@ -8,7 +8,7 @@ records carry the features for the confidence model (eval/gas_benchmark.py calib
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -20,7 +20,7 @@ from specret.gas.detect import Enhancement, Prepared, enhancement
 from specret.gas.identify import FitContext, Identification, identify, relative_residual
 from specret.gas.library import plume_config
 from specret.gas.plumes import Candidate, column_z, find_candidates, smooth_nan
-from specret.gas.quantify import Quantification, quantify
+from specret.gas.quantify import Quantification, cross_sectional_flux, quantify
 from specret.gas.signatures import window_absorption
 from specret.io.emit_l1b import sibling
 
@@ -134,6 +134,7 @@ class Plume:
     record: CandidateRecord
     confidence: float
     quant: Quantification | None  # None when no wind could be had
+    csf: dict | None = None  # cross-sectional flux: second rate estimate
 
     def row(self) -> dict:
         c, i = self.record.candidate, self.record.ident
@@ -155,6 +156,8 @@ class Plume:
             parts = q.pop("sigma_parts")
             out.update(q)
             out.update({f"rel_sigma_{k}": v for k, v in parts.items()})
+        if self.csf is not None:
+            out.update(self.csf)
         return out
 
 
@@ -165,8 +168,7 @@ def confidence_model(path: Path = MODEL_PATH):
 
 
 def scene_time(prep: Prepared) -> datetime:
-    sid = prep.scene.scene_id
-    return datetime.strptime(sid.split("_")[0], "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
+    return prep.scene.time
 
 
 def build_plumes(
@@ -237,5 +239,20 @@ def build_plumes(
                 cfg["candidates"]["z_low"],
                 retrieval_rel_sd=qcfg["retrieval_rel_sd"],
             )
-        plumes.append(Plume(len(plumes) + 1, r, pi, quant))
+        csf = None
+        if quant is not None:
+            csf = cross_sectional_flux(
+                enh[g_map].alpha,
+                c.rows,
+                c.cols,
+                gas,
+                prep.scene.lat,
+                prep.scene.lon,
+                prep.conditions.surface_km,
+                (quant.source_row, quant.source_col),
+                w.u,
+                w.v,
+                w.speed,
+            )
+        plumes.append(Plume(len(plumes) + 1, r, pi, quant, csf))
     return plumes

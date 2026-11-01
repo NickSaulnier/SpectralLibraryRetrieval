@@ -222,3 +222,58 @@ def requantify(row: dict, u_eff_coef: tuple[float, float], wind=None) -> dict:
         "sigma_q_kg_h": abs(q) * rel,
         "relative_uncertainty": {k: float(v) for k, v in parts.items()},
     }
+
+
+def cross_sectional_flux(
+    alpha: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    gas: str,
+    lat: np.ndarray,
+    lon: np.ndarray,
+    surface_km: float,
+    source: tuple[int, int],
+    wind_u: float,
+    wind_v: float,
+    u10: float,
+    min_transects: int = 3,
+) -> dict:
+    """Second rate estimate (PLAN_GAS.md open question 3): mass flux through transects across
+    the wind, Q = U10 * median over downwind transects of the integrated column across the
+    plume. Pixels are binned by their downwind distance from the source, one pixel wide; each
+    bin's mass divided by its width is the line density (kg/m) crossing that distance.
+
+    Returns q_kg_h (NaN with fewer than `min_transects` downwind bins), the number of
+    transects and their spread (interquartile range relative to the median)."""
+    speed = float(np.hypot(wind_u, wind_v))
+    if not speed > 0:
+        return {"q_csf_kg_h": float("nan"), "transects": 0, "csf_iqr_rel": float("nan")}
+    sr, sc = source
+    area = pixel_area(lat, lon, sr, sc)
+    m1 = kg_per_m2_per_ppmm(gas, surface_km)
+    k = np.cos(np.radians(lat[sr, sc]))
+    east = np.radians(lon[rows, cols] - lon[sr, sc]) * k * EARTH_RADIUS_M
+    north = np.radians(lat[rows, cols] - lat[sr, sc]) * EARTH_RADIUS_M
+    down = (east * wind_u + north * wind_v) / speed
+    width = float(np.sqrt(area))
+    b = np.floor(down / width).astype(int)
+    mass = np.nan_to_num(alpha[rows, cols]) * m1 * area
+    keep = b >= 0
+    if not keep.any():
+        return {"q_csf_kg_h": float("nan"), "transects": 0, "csf_iqr_rel": float("nan")}
+    bins = np.bincount(b[keep], weights=mass[keep])
+    counts = np.bincount(b[keep])
+    line = bins[counts > 0] / width  # kg per m of downwind distance
+    if line.size < min_transects:
+        return {
+            "q_csf_kg_h": float("nan"),
+            "transects": int(line.size),
+            "csf_iqr_rel": float("nan"),
+        }
+    med = float(np.median(line))
+    q75, q25 = np.percentile(line, [75, 25])
+    return {
+        "q_csf_kg_h": med * u10 * 3600.0,
+        "transects": int(line.size),
+        "csf_iqr_rel": float((q75 - q25) / abs(med)) if med else float("nan"),
+    }
