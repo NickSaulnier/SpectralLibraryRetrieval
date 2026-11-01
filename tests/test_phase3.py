@@ -368,3 +368,18 @@ def test_viewer_pixel_by_lat_lon_on_emit_grid(workspace_root, monkeypatch):
     assert (body["pixel"]["x"], body["pixel"]["y"]) == (2, 0)
     assert body["summary"]["best_group"] == "calcite"  # (0 + 2) % 4 -> Calcite
     assert client.get("/api/pixel/EMIT_L2A_RFL_fake").status_code == 400
+
+
+def test_viewer_serves_the_page_it_started_with(workspace_root, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import specret.viewer.app
+    from specret.workspace import Workspace
+
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<p>v1</p>", encoding="utf-8")
+    monkeypatch.setattr(specret.viewer.app, "STATIC", static)
+    client = TestClient(specret.viewer.app.create_app(Workspace(root=workspace_root)))
+    (static / "index.html").write_text("<p>v2</p>", encoding="utf-8")  # code updated on disk
+    assert client.get("/").text == "<p>v1</p>"

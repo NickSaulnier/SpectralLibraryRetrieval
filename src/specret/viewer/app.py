@@ -31,6 +31,8 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 def create_app(ws: Workspace | None = None) -> FastAPI:
     ws = ws or Workspace()
     app = FastAPI(title="specret viewer")
+    # Read once, so a running server always serves the page that matches its own endpoints.
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
 
     @lru_cache(maxsize=4)
     def scene_map(scene_id: str) -> SceneMap:
@@ -72,7 +74,7 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return (STATIC / "index.html").read_text(encoding="utf-8")
+        return page
 
     @app.get("/static/plotly.min.js")
     def plotly_js() -> Response:
