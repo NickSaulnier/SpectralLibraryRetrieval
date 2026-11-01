@@ -436,3 +436,38 @@ def test_committed_viewer_build_matches_its_sources():
     spec.loader.exec_module(mod)
     recorded = (STATIC / "app" / "source-hash.txt").read_text(encoding="utf-8").strip()
     assert recorded == mod.source_hash(), "viewer sources changed: rebuild with `pnpm run build`"
+
+
+def test_viewer_pixel_evidence_matches_explain_match(workspace_root, monkeypatch):
+    """V3: the pixel panel's per-window evidence is what MCP explain_match reports, and the
+    unmixing decomposition adds up."""
+    from fastapi.testclient import TestClient
+
+    import specret.workspace
+    from specret.viewer.app import create_app
+    from specret.workspace import Workspace
+
+    scene_file = workspace_root / "data/scenes/emit/EMIT_L2A_RFL_fake.nc"
+    scene_file.parent.mkdir(parents=True)
+    scene_file.touch()
+    monkeypatch.setattr(specret.workspace, "open_scene", lambda path: FakeScene())
+    ws = Workspace(root=workspace_root, chapters=None)
+    client = TestClient(create_app(ws))
+    body = client.get("/api/pixel/EMIT_L2A_RFL_fake", params={"x": 2, "y": 0}).json()
+    top = body["matches"][0]
+    ref = ws.explain(FakeScene().pixel(0, 2), "emit", top["spectrum_id"])
+    assert top["features"] == ref["windows"][: len(top["features"])]
+
+    prof = {p["window"]: p for p in body["profiles"]}
+    assert prof and all(len(p["matches"]) == min(3, len(body["matches"])) for p in prof.values())
+    for f in top["features"]:
+        p = prof[f["window"]]
+        assert p["depth"][0] == pytest.approx(f["query_depth"], abs=1e-9)
+        assert p["center_nm"][1] == pytest.approx(f["cand_center_nm"], abs=1e-9)
+
+    u = body["unmixing"]["spectra"]
+    model = np.sum(u["components"], axis=0) + np.asarray(u["baseline"])
+    assert model == pytest.approx(np.asarray(u["model"]))
+    assert np.asarray(u["model"]) + np.asarray(u["residual"]) == pytest.approx(
+        np.asarray(body["query"])
+    )

@@ -6,6 +6,8 @@
 * plumes.geojson    one feature per plume: outline polygon(s) plus the plumes.csv fields
 * plumes.csv        one row per plume: gas, confidence, source, IME, Q, sigma_Q, wind, confusers
 * candidates.csv    every candidate with its verdict and features, kept or not
+* plume_spectra.npz each candidate's fit in log-radiance units (identify.FitSpectra), keyed
+                    "<detection gas>_<candidate id>/<array>", plus the scene's gas signatures
 """
 
 from __future__ import annotations
@@ -30,6 +32,29 @@ def plume_label_swath(shape, plumes: list[Plume]) -> np.ndarray:
         c = p.record.candidate
         lab[c.rows, c.cols] = np.where(lab[c.rows, c.cols] == 0, p.id, lab[c.rows, c.cols])
     return lab
+
+
+def write_spectra(path: Path, records: list[CandidateRecord]) -> None:
+    """Every candidate's fit spectra, so the viewer can show the evidence without a rerun."""
+    arrays: dict[str, np.ndarray] = {}
+    for r in records:
+        f = r.ident.spectra
+        if f is None:
+            continue
+        if "centers_nm" not in arrays:
+            arrays["centers_nm"] = f.centers_nm.astype(np.float32)
+            arrays["windows"] = np.asarray(f.windows, dtype=np.float32)
+            arrays["signature_names"] = np.array(list(f.signatures))
+            arrays["signatures"] = np.array(list(f.signatures.values()), dtype=np.float32)
+        key = f"{r.detection_gas}_{r.candidate.id}/"
+        arrays[key + "obs"] = f.obs.astype(np.float32)
+        arrays[key + "null_sd"] = f.null_sd.astype(np.float32)
+        arrays[key + "baseline"] = f.baseline.astype(np.float32)
+        arrays[key + "term_names"] = np.array(list(f.terms), dtype=str)
+        arrays[key + "terms"] = np.array(
+            list(f.terms.values()) or np.zeros((0, f.obs.size)), dtype=np.float32
+        )
+    np.savez_compressed(path, **arrays)
 
 
 def write_scene(
@@ -59,6 +84,7 @@ def write_scene(
     pd.DataFrame([{"scene": scene.scene_id, **r.row()} for r in records]).to_csv(
         folder / "candidates.csv", index=False
     )
+    write_spectra(folder / "plume_spectra.npz", records)
     feats = []
     by_id = {r["plume_id"]: r for r in rows}
     for geom, v in features.shapes(lab, mask=lab > 0, transform=transform):

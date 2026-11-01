@@ -135,11 +135,18 @@ class Unmixer:
             fit = nnls_fit(self.M[active].T, x, self.sum_to_one, self.baseline)
         return Unmixing(active, fit, n, chi2(fit), path)
 
-    def describe(self, u: Unmixing, canonical: pd.DataFrame) -> dict:
+    def describe(
+        self, u: Unmixing, canonical: pd.DataFrame, spectrum: np.ndarray | None = None
+    ) -> dict:
+        """Components by fraction. Given the unmixed `spectrum`, also the decomposition on the
+        good bands: each endmember scaled by its coefficient (in the component order), the
+        baseline, the model (their sum) and the residual."""
         meta = canonical.set_index("spectrum_id")
         ids = self.r.lib.spectrum_ids
-        comps = []
-        for row, frac in sorted(zip(u.rows, u.fit.fractions, strict=True), key=lambda t: -t[1]):
+        comps, scaled = [], []
+        order = sorted(range(len(u.rows)), key=lambda i: -u.fit.fractions[i])
+        for i in order:
+            row, frac = u.rows[i], u.fit.fractions[i]
             m = meta.loc[ids[row]]
             comps.append(
                 {
@@ -149,9 +156,19 @@ class Unmixer:
                     "fraction": float(frac),
                 }
             )
-        return {
+            scaled.append(u.fit.coefficients[i] * self.M[row])
+        out = {
             "components": comps,
             "scale": u.fit.scale,
             "residual_rms": u.rms,
             "reduced_chi2": u.reduced_chi2,
         }
+        if spectrum is not None:
+            model = np.asarray(spectrum, dtype=np.float64)[self.good] - u.fit.residual
+            out["spectra"] = {
+                "components": [c.tolist() for c in scaled],
+                "baseline": (model - np.sum(scaled, axis=0)).tolist(),
+                "model": model.tolist(),
+                "residual": u.fit.residual.tolist(),
+            }
+        return out

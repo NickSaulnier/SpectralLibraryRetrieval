@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, type GeoScene, type Polygon } from "../api/client";
 import { tileQuery, type LayerState } from "./layerState";
+import { windArrow, type Wind } from "./windArrow";
 
 const OSM = {
   tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
@@ -27,6 +28,7 @@ interface Props {
   drawMode: DrawMode;
   selection: Polygon | null;
   compare: LayerState | null;
+  wind: Wind | null; // the selected plume's wind at its source
   onPoint: (lat: number, lon: number) => void;
   onPlume: (plumeId: number) => void;
   onScene: (key: string) => void;
@@ -117,6 +119,7 @@ export function MapView(p: Props) {
           footprints: { type: "geojson", data: EMPTY },
           plumes: { type: "geojson", data: EMPTY },
           selection: { type: "geojson", data: EMPTY },
+          wind: { type: "geojson", data: EMPTY },
         },
         layers: [
           { id: "background", type: "background", paint: { "background-color": "#20242a" } },
@@ -139,6 +142,16 @@ export function MapView(p: Props) {
           {
             id: "plume-selected", type: "line", source: "plumes", filter: ["==", ["get", "plume_id"], -1],
             paint: { "line-color": "#ffffff", "line-width": 3 },
+          },
+          {
+            id: "wind-casing", type: "line", source: "wind",
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#000000", "line-width": 5, "line-opacity": 0.6 },
+          },
+          {
+            id: "wind-line", type: "line", source: "wind",
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#ffffff", "line-width": 2.5 },
           },
           { id: "selection-fill", type: "fill", source: "selection", paint: { "fill-color": "#ffd166", "fill-opacity": 0.1 } },
           {
@@ -275,13 +288,14 @@ export function MapView(p: Props) {
       (m.getSource("plumes") as GeoJSONSource).setData(p.showPlumes && p.plumes ? p.plumes : EMPTY);
       m.setFilter("plume-selected", ["==", ["get", "plume_id"], p.selectedPlume ?? -1]);
       m.setLayoutProperty("osm", "visibility", p.basemap ? "visible" : "none");
+      (m.getSource("wind") as GeoJSONSource).setData(p.wind ? windArrow(p.wind) : EMPTY);
     };
     set();
     m?.on("specret:sync", set);
     return () => {
       m?.off("specret:sync", set);
     };
-  }, [p.scenes, p.activeKey, p.plumes, p.showPlumes, p.selectedPlume, p.basemap]);
+  }, [p.scenes, p.activeKey, p.plumes, p.showPlumes, p.selectedPlume, p.basemap, p.wind]);
 
   useEffect(() => {
     const m = map.current;

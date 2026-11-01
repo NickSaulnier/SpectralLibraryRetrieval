@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
+
 import type { Identification } from "../api/types";
 import { MATCH_COLORS, SpectrumChart } from "../charts/SpectrumChart";
 import { download, pretty, toCsv } from "../lib";
+import { UnmixChart, WindowCards } from "./PixelEvidence";
 
 const TIER: Record<string, string> = { confident: "high", uncertain: "medium", "likely unknown": "low" };
 
@@ -37,10 +40,14 @@ interface Props {
   status: string;
   result: Identification | null;
   name: string;
+  onPin?: () => void;
 }
 
-/** Verdict, spectrum against matches, the matches table and CSV exports. */
-export function ResultPanel({ status, result, name }: Props) {
+/** Verdict, spectrum against matches, the matches table, the selected match's per-window
+ * evidence, the unmixing decomposition and CSV exports. */
+export function ResultPanel({ status, result, name, onPin }: Props) {
+  const [sel, setSel] = useState(0);
+  useEffect(() => setSel(0), [result]);
   const s = result?.summary;
   const tier = TIER[s?.confidence ?? ""] ?? "medium";
   const mix =
@@ -58,6 +65,11 @@ export function ResultPanel({ status, result, name }: Props) {
           <button disabled={!result} onClick={() => download(`${name}_spectra.csv`, spectraCsv(result!))}>
             Spectra CSV
           </button>
+          {onPin && (
+            <button disabled={!result} onClick={onPin} title="Overlay this spectrum with others (up to 5)">
+              Pin
+            </button>
+          )}
         </div>
       </div>
       <div className="status">{status}</div>
@@ -90,7 +102,12 @@ export function ResultPanel({ status, result, name }: Props) {
             </thead>
             <tbody>
               {result.matches.map((m, i) => (
-                <tr key={m.spectrum_id}>
+                <tr
+                  key={m.spectrum_id}
+                  className={`clickable${i === sel ? " sel" : ""}`}
+                  onClick={() => setSel(i)}
+                  title="Show this match's evidence"
+                >
                   <td>
                     {i < 3 && <span className="swatch" style={{ background: `var(${MATCH_COLORS[i]})` }} />}
                     {i + 1}
@@ -106,6 +123,15 @@ export function ResultPanel({ status, result, name }: Props) {
               ))}
             </tbody>
           </table>
+          {result.matches[sel] && (
+            <>
+              <h3>
+                Evidence: {result.matches[sel].material_name} <span className="hint">(pixel → library)</span>
+              </h3>
+              <WindowCards result={result} index={sel} />
+            </>
+          )}
+          <UnmixChart result={result} />
         </>
       )}
     </section>

@@ -78,7 +78,36 @@ def list_plumes(folder: Path, gas: str | None = None, min_q: float | None = None
     )
 
 
-def explain_plume(folder: Path, plume_id: int) -> dict:
+def fit_spectra(folder: Path, detection_gas: str, candidate_id: int) -> dict | None:
+    """A candidate's stored fit (gas/outputs.write_spectra) in log-radiance units, or None
+    for scenes detected before the spectra were stored."""
+    path = folder / "plume_spectra.npz"
+    key = f"{detection_gas}_{int(candidate_id)}/"
+    if not path.exists():
+        return None
+    with np.load(path) as z:
+        if key + "obs" not in z:
+            return None
+        obs, base = z[key + "obs"], z[key + "baseline"]
+        terms = dict(zip(z[key + "term_names"].tolist(), z[key + "terms"], strict=True))
+        model = base + sum(terms.values(), np.zeros_like(obs))
+        return {
+            "units": "ln(radiance / column background), minus the shifted-mask null mean",
+            "wavelengths_nm": z["centers_nm"].tolist(),
+            "windows": z["windows"].tolist(),
+            "observed": obs.tolist(),
+            "null_sd": z[key + "null_sd"].tolist(),
+            "baseline": base.tolist(),
+            "terms": {t: v.tolist() for t, v in terms.items()},
+            "model": model.tolist(),
+            "remainder": (obs - model).tolist(),
+            "signatures_per_ppmm": dict(
+                zip(z["signature_names"].tolist(), z["signatures"].tolist(), strict=True)
+            ),
+        }
+
+
+def explain_plume(folder: Path, plume_id: int, spectra: bool = True) -> dict:
     df = _plumes(folder)
     row = df[df["plume_id"] == plume_id]
     if row.empty:
@@ -122,6 +151,14 @@ def explain_plume(folder: Path, plume_id: int) -> dict:
             "relative_uncertainty": {
                 k.removeprefix("rel_sigma_"): r[k] for k in r.index if k.startswith("rel_sigma_")
             },
+            "cross_sectional_flux": {
+                k: r.get(k) for k in ("q_csf_kg_h", "transects", "csf_iqr_rel") if k in r
+            },
+            "source": {k: r.get(k) for k in ("source_lat", "source_lon")},
+            "wind": {k: r.get(k) for k in ("wind_u", "wind_v") if k in r},
+            "spectra": fit_spectra(folder, r["detection_gas"], r["candidate_id"])
+            if spectra
+            else None,
         }
     )
 

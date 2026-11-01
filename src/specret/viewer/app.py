@@ -35,6 +35,30 @@ UNKNOWN_RGB = (128, 128, 128)
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
+def depth_profiles_payload(lib, cfg, query, matches: list[dict], row_of: dict) -> list[dict]:
+    """Continuum-removed band depth per diagnostic window for the query and the top matches,
+    as the feature-fit score sees them (rerank/sff.compute_features)."""
+    from specret.rerank.sff import compute_features
+
+    stack = np.vstack(
+        [np.asarray(query, dtype=np.float64)]
+        + [lib.matrix[row_of[m["spectrum_id"]]] for m in matches]
+    )
+    out = []
+    for wp in compute_features(stack, lib.sensor, cfg).windows:
+        out.append(
+            {
+                "window": wp.window.name,
+                "wavelengths_nm": wp.wavelengths.tolist(),
+                "query": wp.profiles[0].tolist(),
+                "matches": [p.tolist() for p in wp.profiles[1:]],
+                "depth": wp.depth.tolist(),
+                "center_nm": wp.center.tolist(),
+            }
+        )
+    return out
+
+
 def create_app(ws: Workspace | None = None) -> FastAPI:
     ws = ws or Workspace()
     app = FastAPI(title="specret viewer")
@@ -75,13 +99,15 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         matches = result["matches"]
         for m in matches[:3]:
             m["spectrum"] = lib.matrix[row_of[m["spectrum_id"]]][good].tolist()
-        windows = {w.name: [w.lo_nm, w.hi_nm] for w in ws.retriever(sensor).features.windows}
+        cfg = ws.retriever(sensor).features
+        windows = {w.name: [w.lo_nm, w.hi_nm] for w in cfg.windows}
         return jsonable(
             {
                 **result,
                 "wavelengths_nm": s.centers_nm[good].tolist(),
                 "query": np.asarray(query, dtype=float)[good].tolist(),
                 "windows": windows,
+                "profiles": depth_profiles_payload(lib, cfg, query, matches[:3], row_of),
             }
         )
 
@@ -205,7 +231,7 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         spectrum = scene.pixel(row, col)
         if not np.isfinite(spectrum).any():
             raise HTTPException(404, "no data at this location")
-        result = ws.identify(spectrum, sensor, k=5, unmix=True)
+        result = ws.identify(spectrum, sensor, k=5, unmix=True, unmix_spectra=True)
         result["pixel"] = {**ws.pixel_info(scene, row, col), "x": x, "y": y}
         return spectrum_payload(sensor, spectrum, result)
 

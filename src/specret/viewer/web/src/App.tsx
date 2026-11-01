@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, type Polygon } from "./api/client";
 import type { Identification, PlumeRow } from "./api/types";
@@ -8,6 +8,7 @@ import { LayerPanel } from "./map/LayerPanel";
 import { mergeLayers, moveLayer, type LayerState } from "./map/layerState";
 import { MapView, type Bounds, type DrawMode } from "./map/MapView";
 import { AreaPanel } from "./panels/AreaPanel";
+import type { Pin } from "./panels/PixelEvidence";
 import { PixelPanel } from "./panels/PixelPanel";
 import { PlumesPanel } from "./panels/PlumesPanel";
 
@@ -31,6 +32,7 @@ export function App() {
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [selection, setSelection] = useState<Polygon | null>(null);
   const [compareId, setCompareId] = useState<string | null>(null);
+  const [pins, setPins] = useState<Pin[]>([]);
 
   const list = scenes.data ?? [];
   const scene = list.find((s) => s.key === key) ?? null;
@@ -41,6 +43,22 @@ export function App() {
     queryFn: () => api.plumesGeojson(key!),
     enabled: !!scene?.analyzed,
   });
+  // The selected plume's evidence (shared with the Plumes panel's query): its wind for the map
+  const plumeDetail = useQuery({
+    queryKey: ["plume", scene?.gas_scene ?? null, plume],
+    queryFn: () => api.plume(scene!.gas_scene!, plume!),
+    enabled: !!scene?.gas_scene && !!scene.analyzed && plume !== null,
+  });
+  const wind = useMemo(() => {
+    const d = plumeDetail.data;
+    const lat = d?.source?.source_lat;
+    const lon = d?.source?.source_lon;
+    const u = d?.wind?.wind_u;
+    const v = d?.wind?.wind_v;
+    return lat != null && lon != null && u != null && v != null && [lat, lon, u, v].every(Number.isFinite)
+      ? { lat, lon, u, v }
+      : null;
+  }, [plumeDetail.data]);
   const values = useQuery({
     queryKey: ["values", key, point?.lat, point?.lon],
     queryFn: () => api.values(key!, point!.lat, point!.lon),
@@ -165,6 +183,7 @@ export function App() {
           drawMode={drawMode}
           selection={selection}
           compare={layers.find((l) => l.id === compareId) ?? null}
+          wind={wind}
           onSelection={(poly) => {
             setSelection(poly);
             setDrawMode(null);
@@ -215,6 +234,8 @@ export function App() {
                 name={name}
                 onField={onField}
                 onMapped={refresh}
+                pins={pins}
+                onPins={setPins}
               />
             )}
             {tab === "area" && (

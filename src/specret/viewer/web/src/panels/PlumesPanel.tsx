@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import type { GasSummaryPart, PlumeExplanation, PlumeRow } from "../api/types";
 import { useJob } from "../hooks/useJob";
 import { fmt } from "../lib";
+import { FitChart, Rates, SignatureChart } from "./PlumeEvidence";
 
 const GASES = ["CH4", "CO2"];
 
@@ -118,13 +119,19 @@ function PlumeTable({ rows, selected, onSelect }: { rows: PlumeRow[]; selected: 
   );
 }
 
+/** Direction the air moves towards, as a compass point. */
+export function compass(u: number, v: number): string {
+  const deg = ((Math.atan2(u, v) * 180) / Math.PI + 360) % 360;
+  return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8];
+}
+
 function PlumeDetail({ plume, e }: { plume: PlumeRow; e: PlumeExplanation }) {
   const terms = Object.entries(e.fitted_terms)
     .map(([k, v]) => `${k.replace("confuser:", "confuser ")} ${fmt(v, k.startsWith("confuser") ? 3 : 0)}`)
     .join(", ");
-  const unc = Object.entries(e.relative_uncertainty)
-    .map(([k, v]) => `${k} ${fmt(100 * v)}%`)
-    .join(", ");
+  const u = e.wind?.wind_u;
+  const v = e.wind?.wind_v;
+  const hasWind = u != null && v != null && Number.isFinite(u) && Number.isFinite(v);
   return (
     <div className="plume-detail">
       <b>
@@ -133,13 +140,27 @@ function PlumeDetail({ plume, e }: { plume: PlumeRow; e: PlumeExplanation }) {
       , confidence {fmt(e.confidence, 2)} · source {fmt(plume.source_lat, 5)}, {fmt(plume.source_lon, 5)}
       <div className="ev">Fit: {terms}</div>
       <div className="ev">
-        Q {fmt(e.rate.q_kg_h)} ± {fmt(e.rate.sigma_q_kg_h)} kg/h · IME {fmt(e.rate.ime_kg, 1)} kg, L {fmt(e.rate.length_m)} m,
-        wind {fmt(e.rate.u10, 2)} m/s ({e.rate.wind_source}), U<sub>eff</sub> {fmt(e.rate.u_eff, 2)} m/s
-      </div>
-      <div className="ev">
-        Uncertainty: {unc}
+        IME {fmt(e.rate.ime_kg, 1)} kg, L {fmt(e.rate.length_m)} m, wind {fmt(e.rate.u10, 2)} m/s
+        {hasWind && ` towards ${compass(u!, v!)}`} ({e.rate.wind_source}), U<sub>eff</sub> {fmt(e.rate.u_eff, 2)} m/s
+        {hasWind && " · arrow on the map"}
         {e.carbonate_fraction != null && ` · carbonate under plume ${fmt(100 * e.carbonate_fraction)}%`}
       </div>
+      <Rates e={e} />
+      {e.spectra ? (
+        <>
+          <h3>Fit</h3>
+          <p className="hint">
+            The plume's mean log-radiance residual against the fitted terms; the band is the spread of the same mask
+            shifted to plume-free places.
+          </p>
+          <FitChart s={e.spectra} />
+          <h3>Candidate gases</h3>
+          <SignatureChart s={e.spectra} fitted={Object.keys(e.fitted_terms)} />
+        </>
+      ) : (
+        <p className="hint">This scene was analyzed before fit spectra were stored; detect again to see the fit.</p>
+      )}
+      <h3>Confidence features</h3>
       <table>
         <tbody>
           {Object.entries(e.evidence).map(([k, v]) => (

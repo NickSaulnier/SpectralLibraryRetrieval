@@ -962,8 +962,9 @@ def main(argv: list[str] | None = None) -> None:
         help="find, identify and quantify gas plumes in EMIT L1B radiance",
         description="CH4 and CO2 matched filters, candidate plumes, joint gas + confuser "
         "identification, calibrated confidence and emission rates (wind from HRRR or MERRA-2). "
-        "Writes enhancement maps, plume_mask.tif, confidence.tif, plumes.geojson, plumes.csv "
-        "and candidates.csv to outputs/gas/<scene id>/. --enhancement-only writes one gas's "
+        "Writes enhancement maps, plume_mask.tif, confidence.tif, plumes.geojson, plumes.csv, "
+        "candidates.csv and plume_spectra.npz (each candidate's fit, for the viewer) to "
+        "outputs/gas/<scene id>/. --enhancement-only writes one gas's "
         "enhancement map and stops.",
     )
     dp.add_argument(

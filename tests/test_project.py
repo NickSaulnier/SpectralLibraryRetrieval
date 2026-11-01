@@ -131,8 +131,9 @@ def test_doctor_cli(project, capsys, tmp_path_factory, monkeypatch):
     assert "is not the project folder" in capsys.readouterr().out
 
 
-def test_hytes_radiance_is_not_a_mineral_scene(project):
+def test_gas_radiance_is_not_a_mineral_scene(project):
     from specret.workspace import Workspace
 
     write_envi(project / "data/scenes/hytes/flight/flight_l1.hdr", np.linspace(7450, 12000, 8))
+    write_envi(project / "data/scenes/avirisng/ang1/ang1_rdn_glt.hdr", np.linspace(400, 2500, 8))
     assert set(Workspace(project).scenes()) == {"f1_img", "f2_img"}

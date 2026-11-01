@@ -206,11 +206,13 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
         return gas.list_plumes(ws.gas_dir(scene_id), gas_name, min_q_kg_h)
 
     @mcp.tool
-    def explain_plume(scene_id: str, plume_id: int) -> dict:
+    def explain_plume(scene_id: str, plume_id: int, include_spectra: bool = False) -> dict:
         """Why a plume was called what it was: the fitted terms (gases in ppm·m, confusers),
         the evidence features behind its confidence, the carbonate fraction under it, and
-        the rate's uncertainty budget."""
-        return gas.explain_plume(ws.gas_dir(scene_id), plume_id)
+        the rate's uncertainty budget, with the cross-sectional flux as a second rate.
+        With include_spectra, also the stored fit per band: the plume's mean log-radiance
+        residual, each fitted term, the remainder and the null spread."""
+        return gas.explain_plume(ws.gas_dir(scene_id), plume_id, spectra=include_spectra)
 
     @mcp.tool
     def quantify_plume(

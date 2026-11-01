@@ -64,14 +64,15 @@ class Workspace:
         return sorted(p.parent.name for p in (self.root / "data/resampled").glob("*/library.npz"))
 
     def scenes(self) -> dict[str, SceneInfo]:
-        """Reflectance scenes for mineral mapping. HyTES thermal radiance under
-        data/scenes/hytes is also ENVI, but belongs to the gas pipeline, so it is skipped."""
+        """Reflectance scenes for mineral mapping. HyTES thermal radiance (data/scenes/hytes)
+        and AVIRIS-NG radiance with its GLT/LOC/OBS files (data/scenes/avirisng) are also ENVI,
+        but belong to the gas pipeline, so they are skipped."""
         root = self.root / "data/scenes"
         out = {}
         for p in sorted(root.rglob("EMIT_L2A_RFL_*.nc")):
             out[p.stem] = SceneInfo(p.stem, p, "emit")
         for p in sorted(root.rglob("*.hdr")):
-            if "hytes" not in p.relative_to(root).parts:
+            if not {"hytes", "avirisng"} & set(p.relative_to(root).parts):
                 out[p.stem] = SceneInfo(p.stem, p, "aviris")
         return out
 
@@ -191,7 +192,14 @@ class Workspace:
                 self._retrievers[key] = Unmixer(self.retriever(sensor), self.canonical)
             return self._retrievers[key]
 
-    def identify(self, spectrum: np.ndarray, sensor: str, k: int = 5, unmix: bool = False) -> dict:
+    def identify(
+        self,
+        spectrum: np.ndarray,
+        sensor: str,
+        k: int = 5,
+        unmix: bool = False,
+        unmix_spectra: bool = False,
+    ) -> dict:
         r = self.retriever(sensor)
         matches = r.query(spectrum, k=k, with_explain=True)[0]
         for m in matches:
@@ -205,13 +213,17 @@ class Workspace:
             p = float(model.predict(feats)[0])
         out = {"sensor": sensor, "summary": _summary(matches, p), "matches": matches}
         if unmix:
-            out["unmixing"] = self.unmix(spectrum, sensor)
+            out["unmixing"] = self.unmix(spectrum, sensor, unmix_spectra)
         return jsonable(out)
 
-    def unmix(self, spectrum: np.ndarray, sensor: str) -> dict | None:
+    def unmix(self, spectrum: np.ndarray, sensor: str, spectra: bool = False) -> dict | None:
+        """Endmembers and fractions; with `spectra`, the decomposition per band too."""
         u = self.unmixer(sensor)
-        result = u.unmix(np.asarray(spectrum, dtype=np.float64), self.noise_curve(sensor))
-        return None if result is None else jsonable(u.describe(result, self.canonical))
+        x = np.asarray(spectrum, dtype=np.float64)
+        result = u.unmix(x, self.noise_curve(sensor))
+        if result is None:
+            return None
+        return jsonable(u.describe(result, self.canonical, x if spectra else None))
 
     def explain(self, spectrum: np.ndarray, sensor: str, spectrum_id: str) -> dict:
         r = self.retriever(sensor)

@@ -24,11 +24,26 @@ export interface Job {
   [key: string]: unknown;
 }
 
+/** One diagnostic window's part in a match score (rerank/sff.explain). */
 export interface FeatureEvidence {
   window: string;
+  weight: number;
+  score: number;
+  query_depth: number;
   query_center_nm: number;
+  cand_depth: number;
   cand_center_nm: number;
   shape_r: number;
+}
+
+/** Continuum-removed band depth in one window: the query, then the top matches in order. */
+export interface WindowProfile {
+  window: string;
+  wavelengths_nm: number[];
+  query: number[];
+  matches: number[][];
+  depth: number[];
+  center_nm: number[];
 }
 
 export interface Match {
@@ -52,8 +67,19 @@ export interface Summary {
 }
 
 export interface UnmixComponent {
+  spectrum_id?: string;
   material_name: string;
+  group?: string | null;
   fraction: number;
+}
+
+export interface Unmixing {
+  components: UnmixComponent[];
+  scale?: number;
+  residual_rms?: number;
+  reduced_chi2?: number | null;
+  /** Per band (the good bands): endmembers scaled by their coefficients, in component order. */
+  spectra?: { components: number[][]; baseline: number[]; model: number[]; residual: number[] };
 }
 
 export interface PixelInfo {
@@ -69,10 +95,11 @@ export interface Identification {
   sensor: string;
   summary: Summary;
   matches: Match[];
-  unmixing?: { components: UnmixComponent[] } | null;
+  unmixing?: Unmixing | null;
   wavelengths_nm: number[];
   query: number[];
   windows: Record<string, [number, number]>;
+  profiles?: WindowProfile[];
   pixel?: PixelInfo;
   name?: string;
 }
@@ -139,4 +166,22 @@ export interface PlumeExplanation {
     sigma_q_kg_h: number;
   };
   relative_uncertainty: Record<string, number>;
+  cross_sectional_flux?: { q_csf_kg_h?: number | null; transects?: number | null; csf_iqr_rel?: number | null };
+  source?: { source_lat: number | null; source_lon: number | null };
+  wind?: { wind_u?: number | null; wind_v?: number | null };
+  spectra?: PlumeSpectra | null;
+}
+
+/** A plume's stored fit (gas/outputs.write_spectra), in log-radiance units. */
+export interface PlumeSpectra {
+  units: string;
+  wavelengths_nm: number[];
+  windows: [number, number][];
+  observed: number[];
+  null_sd: number[];
+  baseline: number[];
+  terms: Record<string, number[]>;
+  model: number[];
+  remainder: number[];
+  signatures_per_ppmm: Record<string, number[]>;
 }

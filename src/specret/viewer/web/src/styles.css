@@ -133,3 +133,17 @@ button.link { border: 0; padding: 0; background: none; color: var(--accent); tex
 .bar-row .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
 .bar-row .bar i { display: block; height: 100%; background: var(--accent); }
 .spark { width: 80px; height: 16px; fill: var(--accent); }
+
+/* Phase V3: evidence views */
+h3 { font-size: 13px; margin: 14px 0 4px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.card { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 12px; }
+.card .values td { padding: 1px 4px; font-size: 12px; }
+.plot.inset { height: 120px; }
+.rates .bar-row { grid-template-columns: 90px 1fr 56px; }
+.bar-row .bar.rate { position: relative; overflow: visible; background: var(--line); }
+.bar-row .bar.rate .range { position: absolute; top: 0; height: 100%; background: var(--window); border: 1px solid var(--accent); border-radius: 4px; box-sizing: border-box; }
+.bar-row .bar.rate .point { position: absolute; top: -3px; width: 3px; height: 14px; margin-left: -1px; background: var(--accent); border-radius: 1px; }
+.budget { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 4px 0; background: var(--line); }
+.budget i { display: block; height: 100%; }

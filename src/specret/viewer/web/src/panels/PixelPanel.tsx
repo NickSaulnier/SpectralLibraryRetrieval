@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import { useJob } from "../hooks/useJob";
 import { fmt, pretty } from "../lib";
 import { FieldDrop } from "./FieldDrop";
+import { addPin, PinnedSpectra, type Pin } from "./PixelEvidence";
 import { ResultPanel } from "./ResultPanel";
 
 interface Props {
@@ -19,6 +20,8 @@ interface Props {
   name: string;
   onField: (file: File) => void;
   onMapped: () => void;
+  pins: Pin[];
+  onPins: (pins: Pin[]) => void;
 }
 
 /** What is at the clicked point: every layer's value, then the mineral identification. */
@@ -78,7 +81,17 @@ export function PixelPanel(p: Props) {
           )}
         </div>
       )}
-      <ResultPanel status={p.status} result={p.result} name={p.name} />
+      <ResultPanel
+        status={p.status}
+        result={p.result}
+        name={p.name}
+        onPin={p.result ? () => p.onPins(addPin(p.pins, { name: p.name, result: p.result! })) : undefined}
+      />
+      <PinnedSpectra
+        pins={p.pins}
+        onRemove={(n) => p.onPins(p.pins.filter((x) => x.name !== n))}
+        onClear={() => p.onPins([])}
+      />
       <FieldDrop onFile={p.onField} />
     </div>
   );

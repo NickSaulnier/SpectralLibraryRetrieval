@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import type { Identification } from "../api/types";
-
-const css = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+import { css, loadPlotly } from "./Plot";
 
 export const MATCH_COLORS = ["--m1", "--m2", "--m3"];
 
@@ -12,13 +11,13 @@ const scaled = (a: number[]) => {
 };
 
 /** The query spectrum over its top three matches, with diagnostic windows shaded. Plotly is
- * loaded on first use, so pages without a chart don't pay for it. */
+ * loaded on first use (charts/Plot.tsx), so pages without a chart don't pay for it. */
 export function SpectrumChart({ result }: { result: Identification }) {
   const el = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
-    import("plotly.js-basic-dist-min").then(({ default: Plotly }) => {
+    loadPlotly().then(({ default: Plotly }) => {
       if (cancelled || !el.current) return;
       const wl = result.wavelengths_nm;
       const traces = [

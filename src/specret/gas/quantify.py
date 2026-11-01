@@ -50,6 +50,8 @@ class Quantification:
     source_col: int
     source_lat: float
     source_lon: float
+    wind_u: float = float("nan")  # m/s toward east, at the source
+    wind_v: float = float("nan")  # m/s toward north
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -190,6 +192,8 @@ def quantify(
         source_col=sc,
         source_lat=float(lat[sr, sc]),
         source_lon=float(lon[sr, sc]),
+        wind_u=float(wind.u),
+        wind_v=float(wind.v),
     )
 
 

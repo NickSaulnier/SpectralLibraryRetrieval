@@ -197,6 +197,34 @@ src/specret/viewer/
 
 ### Phase V3: Spectra and evidence (1–2 weeks)
 
+**Status (2026-11-01): done.**
+- **Stored plume fits:** detection writes `plume_spectra.npz` beside `plumes.csv`. For every candidate it holds the mean log-radiance residual against the shifted-mask null mean, the null spread, the GLS baseline, each fitted term (gases as −α·k, confusers as β·s) and the scene's gas signatures per ppm·m. `explain_plume` reads it (the MCP tool returns it with `include_spectra`), so the plume panel recomputes nothing.
+  - Size: 1.0 MB for the 320 candidates of the Permian scene (20230608T162322).
+  - `plumes.csv` gains the wind components at the source (`wind_u`, `wind_v`); `explain_plume` adds the cross-sectional flux, the source and the wind.
+  - Scenes detected before V3 show a "detect again" note instead of the charts. Of the analyzed scenes, only 20230608T162322 has been detected again so far.
+- **Plume panel:**
+  - **Rates:** both estimates on one scale. Example, Permian plume 1: IME 1,122 ± 524 kg/h, cross-sectional flux 999 kg/h (9 transects, IQR 69%).
+  - **Uncertainty budget:** shown as shares of the variance (wind 57%, retrieval 41%, background 2%).
+  - **Fit chart:** the residual with the null ±1σ band, each term, the fit, and the remainder on its own axis.
+  - **Signatures:** each candidate gas, with the fit windows shaded.
+  - **Wind:** an arrow on the map at the source, 5 minutes of travel long.
+- **What the fit chart shows:**
+  - In radiance units, the plume's mean residual is dominated by surface texture, which the whitened fit discounts. For Permian plume 1 the residual spans −0.08 to 0.06 while the CH4 term reaches −0.011.
+  - The remainder stays inside the null spread: RMS of 0.6–0.9 σ over plumes 1, 2 and 5. That spread is what the band shows, so the chart is honest about how small the gas signal is against the texture.
+- **Pixel panel:**
+  - **Per-window evidence cards** for any match (click a row): band centres, depths, shape r, weight and score, each with a continuum-removed inset of pixel against match.
+  - **Unmixing decomposition:** the endmembers scaled by their coefficients, the baseline, the model and the residual. `Unmixer.describe` returns these when given the spectrum.
+  - **Matches `explain_match`:** a test checks that the cards equal what MCP `explain_match` reports, and that the insets carry the same depths and centres.
+- **Compare mode:** pin up to 5 pixels or field spectra, overlaid and scaled, with a table of their verdicts. Pins persist across scenes.
+- **Charts:**
+  - one lazy-loaded Plotly component, `charts/Plot.tsx`, with a single shared import;
+  - lines and bands break at missing bands (the 1.8–1.95 µm water-vapour gap) instead of bridging them.
+- **Also fixed:** the AVIRIS-NG radiance files (`…_glt`, `…_img`, `…_loc`, `…_obs`) no longer appear as mineral scenes.
+- **Checked in the browser:** pixel cards and insets, match selection, unmixing chart, pinning two pixels, and on Permian plume 1 the rates, budget, fit and signature charts and the wind arrow.
+- **Tests:** 3 new pytest tests (the fit adds up, the npz round trip through `explain_plume`, pixel evidence against `explain_match`) and 5 new Vitest tests (18 in all).
+
+**Plan:**
+
 - **Pixel panel:**
   - the spectrum against the top matches, as now;
   - a continuum-removed inset per diagnostic window;

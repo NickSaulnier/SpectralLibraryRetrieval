@@ -51,6 +51,26 @@ class FitContext:
 
 
 @dataclass
+class FitSpectra:
+    """The fit in log-radiance units, for showing the evidence (viewer, explain_plume).
+
+    obs = y_bar - null mean; the model is baseline + sum(terms); remainder = obs - model.
+    `signatures` is the scene's per-ppm·m absorption k_g (shared between candidates)."""
+
+    centers_nm: np.ndarray
+    windows: list[tuple[float, float]]
+    obs: np.ndarray
+    null_sd: np.ndarray  # spread of the shifted-mask null y_bar
+    baseline: np.ndarray
+    terms: dict[str, np.ndarray]  # term -> fitted contribution (gases: -alpha k)
+    signatures: dict[str, np.ndarray]
+
+    @property
+    def remainder(self) -> np.ndarray:
+        return self.obs - self.baseline - sum(self.terms.values(), np.zeros_like(self.obs))
+
+
+@dataclass
 class Identification:
     candidate_id: int
     gas: str | None  # identified gas, or None
@@ -64,6 +84,7 @@ class Identification:
     n_bands: int = 0
     n_null: int = 0
     features: dict[str, float] = field(default_factory=dict)
+    spectra: FitSpectra | None = None
 
 
 def relative_residual(radiance: np.ndarray, mu: np.ndarray, usable: np.ndarray) -> np.ndarray:
@@ -275,6 +296,23 @@ def identify(
         "consistency": consistency,
         "log_px": float(np.log(cand.n_px)),
     }
+    # Unwhitened contributions; the baseline is the GLS fit of what the terms leave
+    raw = {
+        **{g: -k for g, k in ctx.gas_k.items()},
+        **{f"confuser:{n}": v for n, v in ctx.confusers.items()},
+    }
+    contrib = {t: c * raw[t] for t, c in terms.items()}
+    left = z - (A @ coef if chosen else 0.0)
+    bcoef = np.linalg.lstsq(base[:, ::2], left, rcond=None)[0]
+    spectra = FitSpectra(
+        ctx.centers_nm,
+        list(ctx.windows),
+        y_bar - m,
+        null.std(axis=0),
+        baseline_matrix(ctx.centers_nm, ctx.windows)[:, ::2] @ bcoef,
+        contrib,
+        ctx.gas_k,
+    )
     return Identification(
         candidate_id=cand.id,
         gas=gas,
@@ -288,4 +326,5 @@ def identify(
         n_bands=nb,
         n_null=int(null.shape[0]),
         features=features,
+        spectra=spectra,
     )

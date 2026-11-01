@@ -8,7 +8,18 @@ import { initialLayers, mergeLayers, moveLayer, tileQuery } from "./map/layerSta
 import { selectionGeojson, summaryCsv } from "./panels/AreaPanel";
 import { fmt, parseLatLon, toCsv } from "./lib";
 import { PlumesPanel } from "./panels/PlumesPanel";
-import { matchesCsv, spectraCsv } from "./panels/ResultPanel";
+import { matchesCsv, ResultPanel, spectraCsv } from "./panels/ResultPanel";
+import { addPin, MAX_PINS, pinLabel } from "./panels/PixelEvidence";
+import { budgetShares } from "./panels/PlumeEvidence";
+import { compass } from "./panels/PlumesPanel";
+import { windArrow } from "./map/windArrow";
+import { gapped } from "./charts/Plot";
+
+// Charts are drawn by Plotly, which jsdom cannot render; record what they are given instead
+const plotted: unknown[][] = [];
+vi.mock("plotly.js-basic-dist-min", () => ({
+  default: { react: (_el: unknown, traces: unknown[]) => void plotted.push(traces) },
+}));
 
 describe("helpers", () => {
   it("quotes CSV fields that need it", () => {
@@ -40,7 +51,9 @@ const result: Identification = {
   sensor: "emit",
   summary: { verdict: "calcite", best_material: "Calcite", best_group: "calcite", p_group_correct: 0.8 },
   matches: [
-    { spectrum_id: "t:1", material_name: "Calcite", group: "calcite", score: 0.91, purity_flag: "a", spectrum: [0.5, 0.4] },
+    { spectrum_id: "t:1", material_name: "Calcite", group: "calcite", score: 0.91, purity_flag: "a", spectrum: [0.5, 0.4],
+      features: [{ window: "carbonate_2340", weight: 0.12, score: 0.8, query_depth: 0.11, query_center_nm: 2338,
+                   cand_depth: 0.15, cand_center_nm: 2341, shape_r: 0.93 }] },
   ],
   wavelengths_nm: [2300, 2340],
   query: [0.45, 0.35],
@@ -122,6 +135,11 @@ describe("PlumesPanel", () => {
         evidence: { gas_z: 8.2 }, evidence_meaning: { gas_z: "z-score of the gas" }, carbonate_fraction: 0.4,
         rate: { ime_kg: 50, length_m: 400, u10: 2.1, u_eff: 1.6, wind_source: "HRRR", q_kg_h: 1200, sigma_q_kg_h: 400 },
         relative_uncertainty: { wind: 0.3 },
+        cross_sectional_flux: { q_csf_kg_h: 800, transects: 7, csf_iqr_rel: 0.5 },
+        wind: { wind_u: 1.5, wind_v: 1.5 },
+        spectra: { units: "", wavelengths_nm: [1650, 1660], windows: [[1600, 1700]], observed: [-0.01, -0.02],
+                   null_sd: [0.003, 0.003], baseline: [0, 0], terms: { CH4: [-0.01, -0.019] }, model: [-0.01, -0.019],
+                   remainder: [0, -0.001], signatures_per_ppmm: { CH4: [1e-5, 2e-5], CO2: [1e-7, 0] } },
       },
     };
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(responses[url]), { status: 200 })));
@@ -140,6 +158,13 @@ describe("PlumesPanel", () => {
     rerender(ui(1));
     await waitFor(() => expect(screen.getByText(/z-score of the gas/)).toBeInTheDocument());
     expect(screen.getByText(/carbonate under plume 40%/)).toBeInTheDocument();
+    expect(screen.getByText(/towards NE/)).toBeInTheDocument();
+    expect(screen.getByLabelText("IME 1,200 kg/h")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cross-section 800 kg/h")).toBeInTheDocument();
+    expect(screen.getByText(/7 transects, IQR 50%/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Plume fit" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Gas signatures" })).toBeInTheDocument();
+    await waitFor(() => expect(plotted.flatMap((t) => (t as { name?: string }[]).map((x) => x.name))).toContain("CH4 (fitted)"));
   });
 
   it("offers detection when the scene is not analyzed", () => {
@@ -179,5 +204,58 @@ describe("area exports", () => {
       "layer,CH4 enhancement,90,2,-5,9,ppm·m",
       "plumes,CH4,1,500,,,kg/h",
     ]);
+  });
+});
+
+describe("V3 evidence", () => {
+  it("keeps at most five pins, newest last, one per name", () => {
+    let pins = [] as ReturnType<typeof addPin>;
+    for (let i = 0; i < 7; i++) pins = addPin(pins, { name: `p${i}`, result });
+    expect(pins.map((p) => p.name)).toEqual(["p2", "p3", "p4", "p5", "p6"]);
+    expect(pins).toHaveLength(MAX_PINS);
+    expect(addPin(pins, { name: "p3", result }).map((p) => p.name)).toEqual(["p2", "p4", "p5", "p6", "p3"]);
+    expect([pinLabel("20230524T105835_2314407_002_r703_c525"), pinLabel("field 1")]).toEqual(["r703 c525", "field 1"]);
+  });
+
+  it("breaks spectral lines across missing bands", () => {
+    const g = gapped([1700, 1710, 1960, 1970]);
+    expect(g.x).toEqual([1700, 1710, null, 1960, 1970]);
+    expect(g.y([1, 2, 3, 4])).toEqual([1, 2, null, 3, 4]);
+  });
+
+  it("splits the rate variance between its sources", () => {
+    const b = budgetShares({ wind: 0.3, retrieval: 0.3, mask: 0.0, background: 0.1 });
+    expect(b.map((x) => x.name)).toEqual(["wind", "retrieval", "background"]);
+    expect(b.reduce((s, x) => s + x.share, 0)).toBeCloseTo(1);
+    expect(b[0].share).toBeCloseTo(0.09 / 0.19);
+  });
+
+  it("draws the wind arrow downwind of the source", () => {
+    const fc = windArrow({ lat: 0, lon: 10, u: 2, v: 0 }, 300);
+    const [shaft, head] = fc.features.map((f) => (f.geometry as GeoJSON.LineString).coordinates);
+    expect(shaft[0]).toEqual([10, 0]);
+    expect(shaft[1][0]).toBeCloseTo(10 + 600 / 111_320);
+    expect(shaft[1][1]).toBeCloseTo(0);
+    expect(head[1]).toEqual(shaft[1]);
+    expect(head[0][0]).toBeLessThan(shaft[1][0]);
+    expect(windArrow({ lat: 0, lon: 0, u: 0, v: 0 }).features).toHaveLength(0);
+    expect([compass(0, 1), compass(1, 0), compass(-1, -1)]).toEqual(["N", "E", "SW"]);
+  });
+
+  it("shows a match's per-window evidence and the continuum-removed inset", async () => {
+    plotted.length = 0;
+    const withProfiles = {
+      ...result,
+      profiles: [{ window: "carbonate_2340", wavelengths_nm: [2300, 2340], query: [0, 0.11], matches: [[0, 0.15]],
+                   depth: [0.11, 0.15], center_nm: [2338, 2341] }],
+    };
+    render(<ResultPanel status="" result={withProfiles} name="px" onPin={() => {}} />);
+    expect(screen.getByText("carbonate-2340")).toBeInTheDocument();
+    expect(screen.getByText("2,338 → 2,341 nm")).toBeInTheDocument();
+    expect(screen.getByText("0.93")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pin" })).toBeInTheDocument();
+    await waitFor(() => expect(plotted.length).toBeGreaterThanOrEqual(2));
+    const inset = plotted.find((t) => (t as { name: string }[])[0].name === "pixel" && t.length === 2) as { y: number[] }[];
+    expect(inset[0].y).toEqual([1, 0.89]); // continuum-removed: 1 - depth
   });
 });
