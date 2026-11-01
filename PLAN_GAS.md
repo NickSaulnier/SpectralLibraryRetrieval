@@ -16,6 +16,7 @@ Every results table includes a plain matched-filter row, for the same reason PLA
 |---|---|---|
 | Spectral range | **VSWIR and LWIR now** | PLAN.md's "thermal out of scope" boundary is lifted for gases only. Solid-material retrieval stays VSWIR. LWIR needs an emissive radiance model and new sensors and data (Phase G4). |
 | Output depth | **Detect, identify and quantify** | Outputs: enhancement maps (ppm·m), gas identity with confidence, plume masks, integrated mass enhancement (IME) and emission rate with uncertainty. Quantification needs wind data (Phase G3). |
+| Wind data | **No Copernicus account** | MERRA-2 through the existing Earthdata login is the default, with HRRR for US scenes. Both cover 10 m wind at the overpass time without a new account. |
 | Ship rule | Same as the mineral tool | Real-scene agreement and controlled-release results decide what ships. Results on synthetic, injected plumes are a sanity check only. |
 
 ---
@@ -88,7 +89,10 @@ LWIR targets: SO2, NH3, CH4 (7.7 µm), N2O, and VOCs available in PNNL (for exam
 - **Plume mask:** threshold the enhancement map at k·σ_background, keep connected components above a minimum size, take the source as the upwind maximum, and apply morphological cleanup. The thresholds are fixed on the validation scenes.
 - **IME:** Σ over plume pixels of α̂ · pixel area, converted from ppm·m to kg using the molar mass and air density.
 - **Emission rate:** Q = U_eff · IME / L, where L = √(plume area). U_eff is a calibrated function of the 10 m wind speed (U_eff = a·U10 + b, after Varon et al. 2018), with separate coefficients per sensor resolution.
-- **Wind:** ERA5 (through `cdsapi`), or HRRR over the US (through `herbie`), at the overpass time. The user can override it.
+- **Wind:** 10 m wind at the overpass time, from one of these sources. The user can override it.
+  - **MERRA-2** (default; global, hourly, ~50 km): the `M2T1NXSLV` collection's `U10M` and `V10M`, fetched through `earthaccess` with the existing Earthdata login.
+  - **HRRR** (US scenes; hourly, 3 km): fetched through `herbie` from NOAA's public cloud bucket, no account needed. Preferred over MERRA-2 when the scene is inside its domain.
+  - **ERA5, keyless:** Google's public ARCO-ERA5 copy (read with `xarray` from the public bucket) or the Open-Meteo historical API, used as a cross-check on the wind spread. Copernicus CDS is not used.
 - **Uncertainty:** a quadrature sum of matched-filter noise (from the background σ), wind uncertainty (ensemble or reanalysis spread, at least ±50% by default) and mask sensitivity (re-run at ±1σ thresholds). Wind usually dominates. The tool says so in its output.
 
 ---
@@ -110,7 +114,7 @@ src/specret/
     emit_ghg.py               # EMIT L2B CH4ENH/CO2ENH rasters and CH4PLM/CO2PLM plume complexes (references)
     hitran.py                 # HAPI line-list fetch + cache -> data/raw/hitran/
     pnnl.py                   # PNNL gas-phase IR cross-sections (manual download; see risks)
-    wind.py                   # ERA5 / HRRR 10 m wind at a point and time
+    wind.py                   # MERRA-2 / HRRR (+ keyless ERA5 cross-check) 10 m wind at a point and time
   gas/
     library.py                # -> data/canonical/gas_library.parquet (gas, grid, cross-section, T, P, source)
     signatures.py             # unit absorption spectra per scene: VSWIR (AMF, H2O LUT), LWIR (thermal contrast)
@@ -133,7 +137,7 @@ Changes to existing code:
   - `scenes()` discovers them, and pairs each L1B scene with its L2A sibling (same orbit and scene id) so a gas scene can find its mineral map;
   - new methods `detect_plumes`, `plume`, `explain_plume` and `quantify_plume`.
 - **`scene/jobs.py`:** a generic `start_job(kind, ...)` so gas detection runs as a background job beside mineral mapping.
-- **`project.py` (`setup`/`doctor`):** check for the gas library, HITRAN cache, wind credentials (CDS API key) and L1B scenes, and report what's missing.
+- **`project.py` (`setup`/`doctor`):** check for the gas library, HITRAN cache, wind access (the Earthdata login, plus whether HRRR can be reached) and L1B scenes, and report what's missing.
 - **`cli.py`:** new commands `gas-library`, `detect-plumes <scene>`, `quantify <scene> --plume N [--wind u,v]`, `compare-ghg`, `inject-benchmark`.
 - **`viewer`:**
   - a gas layer toggle (enhancement map with a diverging colour scale) and plume polygons;
@@ -146,7 +150,7 @@ Changes to existing code:
   - `quantify_plume(plume_id, wind?)`: IME, Q, uncertainty budget;
   - `gas_signature(gas, sensor)`: the unit absorption spectrum, for the agent to reason with;
   - `scene_summary`, extended with a gas section.
-- **Dependencies:** `hitran-api` (HAPI), `cdsapi`, `herbie-data` (optional, US only), `scikit-image` (segmentation), `shapely` (plume polygons).
+- **Dependencies:** `hitran-api` (HAPI), `herbie-data` (HRRR, US only), `gcsfs` and `zarr` (keyless ERA5 cross-check), `scikit-image` (segmentation), `shapely` (plume polygons).
 
 Outputs per scene go to `outputs/gas/<scene_id>/`:
 - `ch4_enh.tif`, `co2_enh.tif`, … (ppm·m; LWIR gives column density times ΔT sign);
@@ -176,7 +180,7 @@ Effort assumes part-time work, as in PLAN.md. G1–G3 give a usable VSWIR methan
 - **Spectroscopy:**
   - HITRAN line lists through HAPI for CH4, CO2, H2O, N2O, NH3, H2S, CO, C2H6 and SO2;
   - PNNL cross-sections for the LWIR set (register on the site and download by hand).
-- **Wind:** create a Copernicus CDS account for ERA5. This is your step, like the Earthdata account was.
+- **Wind:** check that `earthaccess` can fetch MERRA-2 `M2T1NXSLV` for one scene's overpass hour, and that `herbie` can fetch HRRR for a US scene. No new account is needed.
 - Update `data/raw/MANIFEST.md` with sources, DOIs and licences.
 
 **Exit:** the scenes, references, spectroscopy and wind access are all on disk or working, with the manifest updated.
@@ -288,7 +292,7 @@ The L2B products and catalogues come from JPL's own matched filter. As with Tetr
 |---|---|---|
 | HyTES data is sparse, hard to find, or lacks published gas labels | G4 has weak validation | Check availability in G0, before writing any LWIR code. Fall back on injected plumes and any published HyTES case studies, and keep G4 explicitly provisional |
 | PNNL database licence forbids redistribution | Can't ship the LWIR library | Keep it in `data/raw/pnnl/` (gitignored); users download it themselves; `doctor` explains. HITRAN cross-sections cover a subset as a fallback |
-| Wind error dominates the emission rate | Wide uncertainty bars | Report it honestly in the budget; allow user wind; prefer HRRR over ERA5 in the US |
+| Wind error dominates the emission rate | Wide uncertainty bars | Report it honestly in the budget; allow user wind; prefer HRRR over MERRA-2 in the US; use the spread between sources as part of the wind uncertainty |
 | Surface confusers (carbonate, hydrocarbons) create false CH4 plumes | Loss of trust | Joint fit with confuser terms plus the mineral-map screen (G2), and a dedicated no-plume test scene |
 | L1B volume (~2 GB/scene) and memory | Slow or out-of-memory runs | Stream by row blocks, as the mineral mapper does; column statistics need only one pass over the cube |
 | LWIR thermal contrast near zero | Silent misses | An explicit low-contrast mask and a "cannot detect" state in the outputs and MCP answers |
