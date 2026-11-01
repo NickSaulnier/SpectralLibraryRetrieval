@@ -9,13 +9,21 @@ confidence with unknown-material flagging. Results are in `results/`.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/) and, for the Qdrant server, Docker.
+Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --extra gpu        # CUDA PyTorch for GPU exact search; drop --extra gpu for CPU only
 uv run pre-commit install
-docker compose up -d       # Qdrant on localhost:6333
+uv run specret setup       # download the USGS library, ingest, resample, calibrate (~1 min)
+uv run specret doctor      # what is in place, and what to run next
+uv run specret identify <spectrum.asd or .csv>
 ```
+
+`setup` skips whatever is already done, so re-run it after adding scenes under
+`data/scenes`. It builds a library for each new set of bands, then the EMIT noise curve and
+calibration. `setup --map` also maps the scenes for the viewer, which takes about 2 min per
+EMIT scene. Docker is only needed for the Qdrant server that `specret index` uses
+(`docker compose up -d`). The individual steps are listed under Pipeline below.
 
 ## Data
 

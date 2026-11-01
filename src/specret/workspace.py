@@ -112,11 +112,9 @@ class Workspace:
             sc = np.asarray(scene.centers_nm)
             if c.shape == sc.shape and np.allclose(c, sc, atol=0.5):
                 return name
-        path = getattr(scene, "path", None) or getattr(scene, "hdr_path", "<scene file>")
-        cfg = "emit" if str(path).endswith(".nc") else "aviris_classic"
         raise ValueError(
-            "no resampled library matches this scene's bands; run "
-            f"`specret resample --sensor {cfg} --band-file {path}`"
+            "no resampled library matches this scene's bands; put the scene under "
+            "data/scenes and run `specret setup` to build one"
         )
 
     @staticmethod

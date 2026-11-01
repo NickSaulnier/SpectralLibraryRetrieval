@@ -275,6 +275,26 @@ def cmd_identify(args: argparse.Namespace) -> None:
         print(f"\nwrote {len(results)} rows to {args.csv}")
 
 
+def cmd_doctor(args: argparse.Namespace) -> None:
+    from specret.project import inspect, report
+
+    items = inspect()
+    print(f"specret doctor: {Path.cwd()}")
+    print(report(items))
+    raise SystemExit(0 if all(it.ok for it in items if it.level == "required") else 1)
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    from specret.project import report, setup
+
+    try:
+        items = setup(main, map_scenes=args.map)
+    except RuntimeError as exc:
+        raise SystemExit(f"error: {exc}") from None
+    print("\n=== status")
+    print(report(items))
+
+
 def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     import numpy as np
 
@@ -397,7 +417,8 @@ def cmd_map_scene(args: argparse.Namespace) -> None:
         chapters=chapters,
         sff_weight=args.sff_weight,
     )
-    model = Workspace().confidence_model(r.lib.sensor.name)
+    # Calibrations are named after the library folder, as in the viewer and MCP tools.
+    model = Workspace().confidence_model(Path(args.library_npz).parent.name)
     smap = map_scene(scene, r, canonical, k=args.k, confidence=model)
     out = Path(args.out or f"outputs/maps/{Path(args.scene).stem}")
     smap.save(out / "scene_map.npz")
@@ -739,6 +760,19 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--encoder", help="encoder checkpoint for learned methods")
     c.add_argument("--out", help="folder for per-pixel results (parquet)")
     c.set_defaults(func=cmd_compare_l2bmin)
+
+    dr = sub.add_parser("doctor", help="show what is set up and what to run next")
+    dr.set_defaults(func=cmd_doctor)
+
+    su = sub.add_parser(
+        "setup",
+        help="download, ingest, resample and calibrate whatever is missing",
+        description="Run the missing pipeline steps in order: USGS download, ingest, sensor "
+        "libraries, a library for each scene's bands, EMIT noise curve and calibration. "
+        "Steps already done are skipped, so it is safe to re-run after adding scenes.",
+    )
+    su.add_argument("--map", action="store_true", help="also map unmapped scenes for the viewer")
+    su.set_defaults(func=cmd_setup)
 
     args = p.parse_args(argv)
     if getattr(args, "qdrant_path", None):

@@ -1,0 +1,6 @@
+name: avirisc_scene
+description: AVIRIS-Classic flight (224 bands, ~10 nm) with band centres from the scene's ENVI header
+# Used by `specret setup` when a flight's bands differ from the 2014 set in aviris_classic.yaml.
+# Pass the .hdr with --band-file.
+band_source: envi
+bad_band_sets: [atmospheric_water, edges]
