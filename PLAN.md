@@ -210,6 +210,66 @@ Pursue this only if Phases 2–4 leave a clear gap, typically on heavily mixed o
 - **Integration:** a `learned` vector added into RRF alongside the physics vectors. Keep the SFF rerank, which preserves explainability.
 - **Ship rule:** adopt the encoder only if it improves real-scene and field-spectrum accuracy over the Phase 2 pipeline. Synthetic gains alone don't count.
 
+### Phase 5b: Real-pixel pretraining for the encoder (planned 2026-10-31)
+
+**Status (2026-10-31):** run, **not adopted**. On the Mountain Pass validation scene, the best variant (pretraining + real-pixel mixing) reached 28.1% group agreement as `hybrid+learned`, against 39.8% for `hybrid`. The Cuprite test was therefore not run. It found and fixed a tokenizer bug (continuum-removed values up to ±464 on noisy real pixels). See `results/phase5b_pretraining.md`.
+
+**Why:** the Phase 5 encoder is the best method on the synthetic benchmark (0.63 vs 0.58 all-distortions group top-1) and transfers across sensors with no loss. On real EMIT pixels it collapses to generic rock/soil matches, though: 14% agreement with L2B MIN over Cuprite, against 55% for the hybrid. The gap is synthetic library spectra against real pixels. The fix is to let the encoder see real pixels during training, without ever using the evaluation scene.
+
+**Data:** four new EMIT version-001 scenes. Cuprite stays the held-out test scene and is never used for training or model selection. All four candidates were found by an unauthenticated catalogue search on 2026-10-31.
+
+| Role | Site | Granule | Cloud | Why |
+|---|---|---|---:|---|
+| Pretraining (unlabelled) | Pilbara, Western Australia | `EMIT_L2A_RFL_001_20240716T063940_2419804_012` | 0% | Fe-oxide-rich soils and laterites; old weathered terrain |
+| Pretraining (unlabelled) | Kalahari, Namibia | `EMIT_L2A_RFL_001_20230524T105835_2314407_002` | 0% | Sand, calcrete, sparse dry vegetation |
+| Pretraining (unlabelled) | Sar Cheshmeh, Iran | `EMIT_L2A_RFL_001_20230626T070735_2317705_009` | 3% | Porphyry-copper alteration (sericite, kaolinite, alunite, jarosite) |
+| Validation (labelled by L2B MIN) | Mountain Pass, California | `EMIT_L2A_RFL_001_20240416T210255_2410714_015` | 1% | Carbonatite and Mojave desert; used for model selection only |
+| Test (unchanged) | Cuprite, Nevada | `EMIT_L2A_RFL_001_20240727T213005_2420914_007` | 3% | Never used for training or selection |
+
+- **Downloads:** reflectance (RFL) plus cloud mask (MASK) for the three pretraining scenes, and RFL plus L2B MIN for Mountain Pass. That's about 1.9 GB per scene, ~7.6 GB in total. The uncertainty granules are skipped; the Cuprite noise curve stands in.
+- **Pixel sampling (`specret sample-pixels`):**
+  - drop pixels flagged in the L2A cloud, cirrus, water or spacecraft mask bands, and fill values;
+  - sample about 200k pixels per scene on a spatially stratified grid;
+  - store them as float16 in `data/derived/pretrain/`, about 350 MB in total.
+
+**Method** (each step is an ablation; all compared against Phase 5 `encoder_v1`):
+1. **Masked-band pretraining (`specret pretrain-encoder`):**
+   - mask about 40% of a real pixel's tokens, in contiguous chunks plus random bands;
+   - a light per-token decoder reconstructs the masked relative-reflectance and continuum-removed values, scored by MSE on masked tokens only;
+   - about 20k steps at batch 512, ~30 min on the 4090.
+
+   The encoder exposes per-token states for this, and the decoder is discarded afterwards.
+2. **Fine-tuning from the pretrained weights:** the same supervised contrastive training as Phase 5 (`train-encoder --init <pretrained.pt>`).
+3. **Real-background mixing:** in fine-tuning, half of the mixing partners are real pixels, not library spectra, with the library material dominant at 0.5–0.95. Labels stay the library's, so the embedding learns to ignore real soil and vegetation backgrounds.
+4. **Multi-task fine-tuning:** keep the masked-band loss on real pixels as an auxiliary term (weight λ, tuned on validation) so the representation doesn't drift back to library-only features.
+5. **Optional:** a CORAL or MMD loss aligning the embedding statistics of library views and real pixels.
+
+**Model selection:**
+- agreement with L2B MIN on Mountain Pass (pixels with a ~2 µm detection, depth ≥ 0.05);
+- plus group top-1 on the val split (clean and "all" recipes).
+
+Cuprite and the test split are run once per final candidate.
+
+**Ship rule (stricter than Phase 5):** adopt `hybrid+learned` (or `learned`) as the default only if on Cuprite:
+- group top-1 > 55.2% and class top-1 > 66.8%;
+- none of alunite, white mica, calcite or silica drops by more than 5 points;
+- Mountain Pass agreement also beats `hybrid`.
+
+If adopted, re-run `specret calibrate` and re-map the scenes.
+
+**Deliverables:**
+- `sample-pixels`, `pretrain-encoder`, and `train-encoder --init/--real-mix/--aux-weight`;
+- tests for masking, the reconstruction loss and the real-pixel sampler;
+- `results/phase5b_pretraining.md` with the ablation table (val, Mountain Pass, Cuprite, synthetic test).
+
+**Compute:** about 30 min of pretraining plus 5–10 min per fine-tuning ablation, roughly 2 GPU-hours in total.
+
+**Risks:**
+- **Learning the wrong structure:** masked reconstruction can learn atmospheric-residual and noise structure rather than mineralogy. Real-background mixing and the auxiliary weight are the levers.
+- **Tetracorder overlap:** L2B MIN is Tetracorder output, so validation and test both measure agreement with it (Decision 7).
+- **A narrow validation scene:** Mountain Pass's L2B detections may be dominated by a few groups (carbonates, white mica). Selection could then favour those groups, so per-group results are reported.
+- **Atacama:** Atacama sites returned no clear version-001 scenes. A South American site can be added later if more diversity is needed.
+
 ---
 
 ## 3. Cross-cutting components

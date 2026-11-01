@@ -20,6 +20,8 @@ from torch import nn
 
 from specret.preprocess.continuum import continuum_removed
 
+MIN_REFLECTANCE = 0.002  # bands darker than this carry no usable shape information
+
 
 @dataclass
 class EncoderConfig:
@@ -50,6 +52,7 @@ class SpectralEncoder(nn.Module):
             nn.Linear(cfg.d_model, cfg.d_model),
         )
         self.cls = nn.Parameter(torch.zeros(1, 1, cfg.d_model))
+        self.mask_token = nn.Parameter(torch.zeros(cfg.d_model))  # masked-band pretraining
         layer = nn.TransformerEncoderLayer(
             cfg.d_model, cfg.n_heads, cfg.d_ff, cfg.dropout, batch_first=True, norm_first=True
         )
@@ -59,18 +62,40 @@ class SpectralEncoder(nn.Module):
             nn.Linear(cfg.d_model, cfg.d_model), nn.GELU(), nn.Linear(cfg.d_model, cfg.embed_dim)
         )
 
-    def forward(self, tokens: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
-        """tokens (B, T, 4) = [rel. reflectance, CR value, wavelength um, fwhm um]; pad (B, T)
-        True where a token is absent. Returns unit-length embeddings (B, embed_dim)."""
+    def encode(
+        self, tokens: torch.Tensor, pad: torch.Tensor, hidden: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Normalised hidden states (B, 1 + T, d_model); index 0 is the CLS token.
+
+        `hidden` (B, T) marks tokens whose values are replaced by the mask token while their
+        wavelength and FWHM stay visible (masked-band pretraining).
+        """
         val = self.value_proj(tokens[..., :2])
+        if hidden is not None:
+            val = torch.where(hidden[..., None], self.mask_token.to(val.dtype), val)
         pos = self.pos_proj(
             torch.cat([wavelength_encoding(tokens[..., 2], self.cfg.n_freq), tokens[..., 3:4]], -1)
         )
         x = torch.cat([self.cls.expand(len(tokens), -1, -1), val + pos], dim=1)
         mask = torch.cat([torch.zeros_like(pad[:, :1]), pad], dim=1)
-        h = self.encoder(x, src_key_padding_mask=mask)
-        z = self.head(self.norm(h[:, 0]))
+        return self.norm(self.encoder(x, src_key_padding_mask=mask))
+
+    def forward(self, tokens: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
+        """tokens (B, T, 4) = [rel. reflectance, CR value, wavelength um, fwhm um]; pad (B, T)
+        True where a token is absent. Returns unit-length embeddings (B, embed_dim)."""
+        z = self.head(self.encode(tokens, pad)[:, 0])
         return nn.functional.normalize(z, dim=-1)
+
+
+class BandDecoder(nn.Module):
+    """Predicts each token's [rel. reflectance, CR value] from its hidden state."""
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, 2))
+
+    def forward(self, h_tokens: torch.Tensor) -> torch.Tensor:
+        return self.net(h_tokens)
 
 
 def make_tokens(
@@ -82,15 +107,19 @@ def make_tokens(
     """Token arrays for spectra on one band set. Invalid (NaN or masked) bands become padding.
 
     Returns tokens (B, T, 4) float32 and pad (B, T) bool.
+
+    Bands at or below MIN_REFLECTANCE are dropped: real pixels have slightly negative values at
+    noisy bands, where continuum removal would divide by ~0 (values of +-400 were seen). The
+    remaining values are clipped to physical ranges.
     """
     S = np.atleast_2d(np.asarray(spectra, dtype=np.float64)).copy()
-    ok = np.isfinite(S) & (S > -0.5)
+    ok = np.isfinite(S) & (S > MIN_REFLECTANCE)
     if valid is not None:
         ok &= valid
     S[~ok] = np.nan
     mean = np.nanmean(np.where(ok, S, np.nan), axis=1, keepdims=True)
-    rel = S / np.where(np.isfinite(mean) & (mean > 1e-6), mean, 1.0)
-    cr = continuum_removed(centers_nm, S)
+    rel = np.clip(S / np.where(np.isfinite(mean) & (mean > 1e-6), mean, 1.0), 0.0, 5.0)
+    cr = np.clip(continuum_removed(centers_nm, S), 0.0, 1.0)
     ok &= np.isfinite(rel) & np.isfinite(cr)
     B, T = S.shape
     tokens = np.zeros((B, T, 4), dtype=np.float32)
@@ -108,8 +137,14 @@ def save_encoder(model: SpectralEncoder, path, extra: dict | None = None) -> Non
 def load_encoder(path, device: str = "cpu") -> SpectralEncoder:
     ckpt = torch.load(path, map_location=device, weights_only=False)
     model = SpectralEncoder(EncoderConfig(**ckpt["config"]))
-    model.load_state_dict(ckpt["state"])
+    missing, _ = model.load_state_dict(ckpt["state"], strict=False)
+    if set(missing) - {"mask_token"}:  # checkpoints from before pretraining lack only this
+        raise RuntimeError(f"{path}: missing weights {missing}")
     return model.to(device).eval()
+
+
+def load_checkpoint(path, device: str = "cpu") -> dict:
+    return torch.load(path, map_location=device, weights_only=False)
 
 
 @torch.no_grad()

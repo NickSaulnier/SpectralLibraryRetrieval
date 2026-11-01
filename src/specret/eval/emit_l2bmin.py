@@ -67,18 +67,31 @@ def compare_group2(
     bbox: tuple[float, float, float, float],
     min_depth: float = 0.05,
     k: int = 5,
+    max_pixels: int | None = None,
+    seed: int = 0,
 ) -> pd.DataFrame:
-    """One row per pixel in `bbox` where L2B MIN reports a ~2 um mineral above `min_depth`."""
-    west, south, east, north = bbox
-    in_box = (l2b.lon > west) & (l2b.lon < east) & (l2b.lat > south) & (l2b.lat < north)
-    sel = in_box & (l2b.group2_id > 0) & (l2b.group2_depth >= min_depth)
+    """One row per pixel in `bbox` where L2B MIN reports a ~2 um mineral above `min_depth`.
+
+    `bbox` None means the whole scene; `max_pixels` takes a fixed random sample.
+    """
+    sel = (l2b.group2_id > 0) & (l2b.group2_depth >= min_depth)
+    if bbox is not None:
+        west, south, east, north = bbox
+        sel &= (l2b.lon > west) & (l2b.lon < east) & (l2b.lat > south) & (l2b.lat < north)
     rows, cols = np.nonzero(sel)
+    if max_pixels is not None and rows.size > max_pixels:
+        keep = np.sort(np.random.default_rng(seed).choice(rows.size, max_pixels, replace=False))
+        rows, cols = rows[keep], cols[keep]
     if rows.size == 0:
         return pd.DataFrame()
 
-    r0, r1, c0, c1 = rows.min(), rows.max() + 1, cols.min(), cols.max() + 1
-    block = scene.block(slice(r0, r1), slice(c0, c1))
-    spectra = block[rows - r0, cols - c0].astype(np.float64)
+    spectra = np.empty((rows.size, len(scene.centers_nm)))
+    for r0 in range(rows.min(), rows.max() + 1, 128):  # read in row bands to bound memory
+        m = (rows >= r0) & (rows < r0 + 128)
+        if m.any():
+            c0, c1 = cols[m].min(), cols[m].max() + 1
+            block = scene.block(slice(r0, min(r0 + 128, rows.max() + 1)), slice(c0, c1))
+            spectra[m] = block[rows[m] - r0, cols[m] - c0]
     matches = retriever.query(spectra, k=k)
 
     records = []

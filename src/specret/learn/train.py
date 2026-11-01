@@ -11,6 +11,13 @@
   closer together than kaolinite and dickite, which sit closer than kaolinite and calcite.
 * Model selection: group top-1 on the val split (library = train) under "clean" and "all"
   recipes. The test split is never touched.
+
+Phase 5b options (all off by default):
+* `init`: start from a masked-band pretrained checkpoint (learn/pretrain.py).
+* `real_pixels` + `real_mix`: with probability `real_mix`, an EMIT view's mixing partner is a
+  real scene pixel instead of a library spectrum, so the embedding learns to look past real
+  soil and vegetation backgrounds.
+* `aux_weight`: keep the masked-band loss on real pixels as an auxiliary term.
 """
 
 from __future__ import annotations
@@ -24,7 +31,15 @@ import pandas as pd
 import torch
 
 from specret.distort.simulator import ATM_FEATURES_NM
-from specret.learn.model import EncoderConfig, SpectralEncoder, embed, make_tokens, save_encoder
+from specret.learn.model import (
+    BandDecoder,
+    EncoderConfig,
+    SpectralEncoder,
+    embed,
+    load_checkpoint,
+    make_tokens,
+    save_encoder,
+)
 from specret.sensors.library import SensorLibrary
 
 TRAIN_SEED = 11_2026  # distinct from the benchmark and mixture seeds
@@ -43,6 +58,11 @@ class TrainConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     seed: int = TRAIN_SEED
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    init: str | None = None
+    real_pixels: np.ndarray | None = field(default=None, repr=False)  # on EMIT bands
+    real_mix: float = 0.0
+    aux_weight: float = 0.0
+    aux_batch: int = 256
 
 
 @dataclass
@@ -173,7 +193,22 @@ def train(
     ref_groups = meta.loc[ref.spectrum_ids, "group"].to_numpy()
 
     model = SpectralEncoder(cfg.encoder).to(cfg.device)
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    decoder = None
+    if cfg.init:
+        ckpt = load_checkpoint(cfg.init, cfg.device)
+        model = SpectralEncoder(EncoderConfig(**ckpt["config"])).to(cfg.device)
+        model.load_state_dict(ckpt["state"])
+        if cfg.aux_weight > 0 and "decoder" in ckpt:
+            decoder = BandDecoder(model.cfg.d_model).to(cfg.device)
+            decoder.load_state_dict(ckpt["decoder"])
+    if cfg.aux_weight > 0 and decoder is None:
+        decoder = BandDecoder(model.cfg.d_model).to(cfg.device)
+    params = [*model.parameters(), *(decoder.parameters() if decoder is not None else [])]
+    opt = torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
+    real = cfg.real_pixels.astype(np.float64) if cfg.real_pixels is not None else None
+    if real is not None and "emit" in data:
+        if real.shape[1] != data["emit"].lib.sensor.n_bands:
+            raise ValueError("real pixels must be on the EMIT library's bands")
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, cfg.lr, total_steps=cfg.steps, pct_start=0.1)
     history, best, t0 = [], -1.0, time.time()
 
@@ -183,7 +218,12 @@ def train(
         s = d.lib.sensor
         x = d.lib.matrix[idx]
         partner_idx = np.array([rng.choice(np.flatnonzero(g_codes != g_codes[i])) for i in idx])
-        x, keep = augment(x, s.centers_nm, s.good_mask, d.lib.matrix[partner_idx], d.noise, rng)
+        partners = d.lib.matrix[partner_idx]
+        if real is not None and name == "emit" and cfg.real_mix > 0:
+            use_real = rng.random(len(idx)) < cfg.real_mix
+            partners = partners.copy()
+            partners[use_real] = real[rng.integers(len(real), size=int(use_real.sum()))]
+        x, keep = augment(x, s.centers_nm, s.good_mask, partners, d.noise, rng)
         tok, pad = make_tokens(x, s.centers_nm, s.fwhm_nm, keep)
         return torch.as_tensor(tok, device=cfg.device), torch.as_tensor(pad, device=cfg.device)
 
@@ -204,9 +244,19 @@ def train(
         gl = torch.as_tensor(np.tile(g_codes[idx], 2), device=cfg.device)
         ml = torch.as_tensor(np.tile(m_codes[idx], 2), device=cfg.device)
         loss = supcon(z, gl, cfg.temperature) + cfg.material_weight * supcon(z, ml, cfg.temperature)
+        if decoder is not None and real is not None:
+            from specret.learn.pretrain import masked_loss, pixel_batch
+
+            es = data["emit"].lib.sensor
+            pt, pp, ph = pixel_batch(
+                real, es.centers_nm, es.fwhm_nm, es.good_mask, cfg.aux_batch, 0.4, rng, cfg.device
+            )
+            with torch.autocast(cfg.device, dtype=torch.bfloat16, enabled=cfg.device == "cuda"):
+                aux = masked_loss(model, decoder, pt, pp, ph)
+            loss = loss + cfg.aux_weight * aux.float()
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(params, 1.0)
         opt.step()
         sched.step()
 

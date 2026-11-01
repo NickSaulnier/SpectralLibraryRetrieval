@@ -32,12 +32,20 @@ class RankResult:
     sff: SFFResult | None  # feature-fit details, None when rerank is off
 
 
-def _sub(lib: SensorLibrary, canonical: pd.DataFrame, vector: str, device: str | None):
-    """A sub-retriever: a physics vector, or "learned" (models/encoder_v1.pt)."""
+def _sub(
+    lib: SensorLibrary,
+    canonical: pd.DataFrame,
+    vector: str,
+    device: str | None,
+    encoder_path: str | None = None,
+):
+    """A sub-retriever: a physics vector, or "learned" (default models/encoder_v1.pt)."""
     if vector == "learned":
-        from specret.search.learned import LearnedRetriever
+        from specret.search.learned import DEFAULT_ENCODER, LearnedRetriever
 
-        return LearnedRetriever(lib, canonical, device=device)
+        return LearnedRetriever(
+            lib, canonical, encoder_path=encoder_path or DEFAULT_ENCODER, device=device
+        )
     return Retriever(lib, canonical, vector, device=device)
 
 
@@ -54,6 +62,7 @@ class HybridRetriever:
         rerank: bool = True,
         sff_weight: float = 0.25,
         device: str | None = None,
+        encoder_path: str | None = None,
     ):
         """`sff_weight` blends the rerank score with the fused rank score (both scaled to
         0-1 per query): 1.0 orders by feature fit alone, 0.0 keeps the fused order. The
@@ -63,7 +72,9 @@ class HybridRetriever:
         )
         self.lib = first.lib  # chapter-filtered
         self.meta = first.meta
-        self.subs = [first] + [_sub(self.lib, canonical, v, device) for v in vectors[1:]]
+        self.subs = [first] + [
+            _sub(self.lib, canonical, v, device, encoder_path) for v in vectors[1:]
+        ]
         self.k_recall, self.n_rerank, self.rerank = k_recall, n_rerank, rerank
         self.sff_weight = sff_weight
         self.features = load_features()

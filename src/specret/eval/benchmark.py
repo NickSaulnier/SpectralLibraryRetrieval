@@ -107,13 +107,20 @@ def build_method(
     canonical: pd.DataFrame,
     chapters: tuple[str, ...] | None = None,
     purity: tuple[str, ...] | None = None,
+    encoder_path: str | None = None,
 ):
     """Retriever for a method name: a vector, `rrf`, `hybrid`, `sid`, `cr_euclid`,
     `learned`, `rrf+learned` or `hybrid+learned`."""
     if name == "learned":
-        from specret.search.learned import LearnedRetriever
+        from specret.search.learned import DEFAULT_ENCODER, LearnedRetriever
 
-        return LearnedRetriever(ref, canonical, chapters=chapters, purity=purity)
+        return LearnedRetriever(
+            ref,
+            canonical,
+            encoder_path=encoder_path or DEFAULT_ENCODER,
+            chapters=chapters,
+            purity=purity,
+        )
     if name in ("rrf+learned", "hybrid+learned"):
         from specret.search.hybrid import DEFAULT_VECTORS, HybridRetriever
 
@@ -124,6 +131,7 @@ def build_method(
             chapters=chapters,
             purity=purity,
             rerank=name.startswith("hybrid"),
+            encoder_path=encoder_path,
         )
     if name in ("sid", "cr_euclid"):
         from specret.search.baselines import BruteForceRetriever

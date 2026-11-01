@@ -87,8 +87,9 @@ uv run specret train-encoder --steps 4000      # ~5 min on a GPU -> models/encod
 uv run specret benchmark data/resampled/emit/library.npz --methods hybrid learned hybrid+learned
 ```
 
-The encoder wins on the synthetic benchmark but not on the real EMIT scene, so it isn't part
-of the default retriever. See `results/phase5_learned.md`.
+The encoder wins on the synthetic benchmark but not on real EMIT scenes, even after
+real-pixel pretraining, so it isn't part of the default retriever. See
+`results/phase5_learned.md` and `results/phase5b_pretraining.md`.
 
 ## Layout
 

@@ -3,6 +3,8 @@
 **Date:** 2026-10-31
 **Ship rule (PLAN.md):** adopt the encoder only if it improves real-scene results over the Phase 2 pipeline. Synthetic gains alone don't count. **It did not, so the default retriever stays `hybrid`.**
 
+> **Note (Phase 5b):** these numbers were produced before a tokenizer fix (dropping near-zero-reflectance bands and clipping token values; see `phase5b_pretraining.md`). Re-running `encoder_v1` with the current code gives slightly different numbers. The fixed-tokenizer baseline is `encoder_v1b`.
+
 ## What was built (`learn/`, `search/learned.py`)
 
 - **Tokens:** one per valid band:

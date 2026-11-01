@@ -17,6 +17,12 @@ One entry per source: where it came from, version, when it was fetched, and its 
 - **Licence:** US Government public domain
 - **Location:** `data/raw/usgs_splib07_html/pages/`
 
+### EMIT scenes for Phase 5b (pretraining and validation)
+- **Source:** NASA LP DAAC (EMITL2ARFL, EMITL2BMIN), fetched with `scripts/download_phase5b.py`
+- **Granules:** Pilbara `20240716T063940_2419804_012`, Kalahari `20230524T105835_2314407_002`, Sar Cheshmeh `20230626T070735_2317705_009` (RFL, MASK, RFLUNCERT); Mountain Pass `20240416T210255_2410714_015` (RFL, MASK, RFLUNCERT, L2B MIN)
+- **Fetched:** 2026-10-31, ~15 GB (the uncertainty granules came from a since-fixed download filter)
+- **Location:** `data/scenes/emit_extra/`; sampled pixel pools in `data/derived/pretrain/`
+
 ## To fetch by hand
 
 ### ECOSTRESS spectral library

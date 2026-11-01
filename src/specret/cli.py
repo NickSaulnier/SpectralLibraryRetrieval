@@ -152,13 +152,17 @@ def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     l2b = load_l2bmin(args.min)
     lib = SensorLibrary.load(args.library_npz)
     canonical = read_library(args.library)
-    bbox = tuple(args.bbox) if args.bbox else CUPRITE_BBOX
+    bbox = tuple(args.bbox) if args.bbox else (None if args.whole_scene else CUPRITE_BBOX)
     for vector in args.vectors:
         chapters = tuple(args.chapters) if args.chapters else None
         purity = tuple(args.purity) if args.purity else None
-        r = build_method(vector, lib, canonical, chapters=chapters, purity=purity)
+        r = build_method(
+            vector, lib, canonical, chapters=chapters, purity=purity, encoder_path=args.encoder
+        )
         r.check_bands(np.asarray(scene.centers_nm))
-        df = compare_group2(scene, l2b, r, bbox, min_depth=args.min_depth, k=args.k)
+        df = compare_group2(
+            scene, l2b, r, bbox, min_depth=args.min_depth, k=args.k, max_pixels=args.max_pixels
+        )
         print(
             f"\n=== vector {vector}: {len(df)} pixels, top-1 group agreement "
             f"{df['top1_agree'].mean():.1%}, top-{args.k} {df['topk_agree'].mean():.1%}, "
@@ -337,6 +341,28 @@ def cmd_eval_unmix(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_sample_pixels(args: argparse.Namespace) -> None:
+    from specret.learn.pixels import sample_pixels, save_pool
+
+    px = sample_pixels(args.rfl, args.mask, args.n)
+    save_pool(args.out, px, args.rfl)
+    print(f"{len(px):,} clear pixels -> {args.out}")
+
+
+def cmd_pretrain(args: argparse.Namespace) -> None:
+    import json
+
+    from specret.learn.pixels import load_pool
+    from specret.learn.pretrain import pretrain
+
+    pixels, centers, fwhm, good = load_pool(args.pools)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    log = pretrain(pixels, centers, fwhm, good, out, steps=args.steps, batch=args.batch)
+    out.with_suffix(".json").write_text(json.dumps(log, indent=2), encoding="utf-8")
+    print(f"pretrained on {log['n_pixels']:,} pixels -> {out}")
+
+
 def cmd_train_encoder(args: argparse.Namespace) -> None:
     import json
 
@@ -353,7 +379,20 @@ def cmd_train_encoder(args: argparse.Namespace) -> None:
         path = Path(f"data/derived/{n}_noise.npy")
         if path.exists():
             noise[n] = np.load(path)
-    cfg = TrainConfig(sensors=tuple(args.sensors), steps=args.steps, batch=args.batch)
+    real = None
+    if args.real_pixels:
+        from specret.learn.pixels import load_pool
+
+        real = load_pool(args.real_pixels)[0]
+    cfg = TrainConfig(
+        sensors=tuple(args.sensors),
+        steps=args.steps,
+        batch=args.batch,
+        init=args.init,
+        real_pixels=real,
+        real_mix=args.real_mix,
+        aux_weight=args.aux_weight,
+    )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     log = train(libs, read_library(args.library), load_splits(), cfg, out, noise)
@@ -483,12 +522,30 @@ def main(argv: list[str] | None = None) -> None:
     eu.add_argument("-n", type=int, default=300)
     eu.set_defaults(func=cmd_eval_unmix)
 
+    sp = sub.add_parser("sample-pixels", help="sample clear EMIT pixels for pretraining")
+    sp.add_argument("--rfl", required=True)
+    sp.add_argument("--mask", help="matching EMIT L2A MASK granule")
+    sp.add_argument("-n", type=int, default=200_000)
+    sp.add_argument("--out", required=True)
+    sp.set_defaults(func=cmd_sample_pixels)
+
+    pt = sub.add_parser("pretrain-encoder", help="masked-band pretraining on real pixels")
+    pt.add_argument("pools", nargs="+", help="pixel pools from `sample-pixels`")
+    pt.add_argument("--steps", type=int, default=20000)
+    pt.add_argument("--batch", type=int, default=512)
+    pt.add_argument("--out", default="models/pretrained_v1.pt")
+    pt.set_defaults(func=cmd_pretrain)
+
     te = sub.add_parser("train-encoder", help="train the learned spectral encoder (Phase 5)")
     te.add_argument("--sensors", nargs="+", default=["emit", "avirisc"])
     te.add_argument("--steps", type=int, default=3000)
     te.add_argument("--batch", type=int, default=256)
     te.add_argument("--library", default=str(DEFAULT_CANONICAL))
     te.add_argument("--out", default="models/encoder_v1.pt")
+    te.add_argument("--init", help="pretrained checkpoint to start from")
+    te.add_argument("--real-pixels", nargs="+", help="pixel pools from `sample-pixels`")
+    te.add_argument("--real-mix", type=float, default=0.0)
+    te.add_argument("--aux-weight", type=float, default=0.0)
     te.set_defaults(func=cmd_train_encoder)
 
     ms = sub.add_parser("map-scene", help="map every pixel of a scene with the hybrid retriever")
@@ -523,6 +580,9 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("-k", type=int, default=5)
     c.add_argument("--chapters", nargs="+", help="restrict the library, e.g. M S C")
     c.add_argument("--purity", nargs="+", help="keep USGS purity grades, e.g. a b u")
+    c.add_argument("--whole-scene", action="store_true", help="use every pixel, not Cuprite")
+    c.add_argument("--max-pixels", type=int, help="random sample of this many pixels")
+    c.add_argument("--encoder", help="encoder checkpoint for learned methods")
     c.add_argument("--out", help="folder for per-pixel results (parquet)")
     c.set_defaults(func=cmd_compare_l2bmin)
 
