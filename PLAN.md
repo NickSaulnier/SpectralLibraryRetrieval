@@ -316,7 +316,7 @@ This is manual work and easy to underestimate, so budget time for it in Phase 2a
   3. Their noise characteristics feed the field noise model in the distortion simulator.
 
 ### 3.5 Scope boundaries
-- VSWIR only (0.38–2.5 µm). Thermal emissivity is out of scope.
+- Solid-material retrieval is VSWIR only (0.38–2.5 µm), and thermal emissivity is out of scope for it. Gas plume detection covers VSWIR and LWIR; see [PLAN_GAS.md](PLAN_GAS.md).
 - Linear areal mixing only.
 - RELAB, EcoSIS and vegetation-specific work wait until after Phase 4.
 - PRISMA is a configuration file only, unless a need comes up.
