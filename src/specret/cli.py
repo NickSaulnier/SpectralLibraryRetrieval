@@ -138,6 +138,143 @@ def cmd_query(args: argparse.Namespace) -> None:
     print(format_matches(r.query(scene.pixel(args.row, args.col), args.k)[0]))
 
 
+FIELD_SUFFIXES = (".asd", ".csv", ".txt", ".tsv")
+
+
+def _field_files(targets: list[str]) -> tuple[list[Path], list[str]]:
+    """Split targets into field spectrum files (expanding folders and globs) and the rest."""
+    import glob
+
+    files, other = [], []
+    for t in targets:
+        p = Path(t)
+        if p.is_dir():
+            found = sorted(f for f in p.iterdir() if f.suffix.lower() in FIELD_SUFFIXES)
+        elif any(ch in t for ch in "*?["):
+            matches = (Path(f) for f in glob.glob(t))
+            found = sorted(f for f in matches if f.suffix.lower() in FIELD_SUFFIXES)
+        elif p.suffix.lower() in FIELD_SUFFIXES:
+            if not p.is_file():
+                raise SystemExit(f"no such file: {t}")
+            found = [p]
+        else:
+            other.append(t)
+            continue
+        if not found:
+            raise SystemExit(f"no field spectra ({', '.join(FIELD_SUFFIXES)}) in {t}")
+        files.extend(found)
+    return files, other
+
+
+def _print_identification(res: dict) -> None:
+    s = res["summary"]
+    head = res["source"]
+    if res.get("name") and res["name"] != Path(res["source"]).stem:
+        head += f" / {res['name']}"
+    if "pixel" in res:
+        px = res["pixel"]
+        head += f"  pixel row {px['row']}, col {px['col']}"
+        if "lat" in px:
+            head += f" ({px['lat']:.5f}, {px['lon']:.5f})"
+    print(f"\n{head}  [{res['sensor']} library]")
+    if not res["matches"]:
+        print(f"  no match: {s['reason']}")
+        return
+    p = s["p_group_correct"]
+    print(f"  {s['verdict']}" + ("" if p is None else f", P(group right) {p:.2f}"))
+    print(f"  best match: {s['best_material']}")
+    if "unmixing" in res:
+        u = res["unmixing"]
+        if u is None:
+            print("  unmixing: no fit")
+        else:
+            parts = " + ".join(
+                f"{c['material_name']} {100 * c['fraction']:.0f}%" for c in u["components"]
+            )
+            print(f"  unmixed: {parts} (residual rms {u['residual_rms']:.4f})")
+    print(f"\n  {'#':>2}  {'score':>5}  {'material':<36} {'group':<18} {'purity':<6} evidence")
+    for i, m in enumerate(res["matches"], start=1):
+        ev = " | ".join(
+            f"{f['window']} {f['query_center_nm']:.0f}->{f['cand_center_nm']:.0f} nm "
+            f"r {f['shape_r']:.2f}"
+            for f in m.get("features", [])[:2]
+        )
+        print(
+            f"  {i:>2}  {m['score']:5.2f}  {str(m['material_name'])[:36]:<36} "
+            f"{str(m.get('group') or '-')[:18]:<18} {str(m.get('purity_flag') or '-'):<6} {ev}"
+        )
+
+
+def _identification_row(res: dict) -> dict:
+    """One flat CSV row per identified spectrum."""
+    s = res["summary"]
+    row = {"source": res["source"], "name": res.get("name"), **res.get("pixel", {})}
+    row.update(
+        sensor=res["sensor"],
+        verdict=s["verdict"],
+        best_group=s.get("best_group"),
+        best_material=s.get("best_material"),
+        p_group_correct=s.get("p_group_correct"),
+        confidence=s.get("confidence"),
+    )
+    for i, m in enumerate(res["matches"], start=1):
+        row[f"match{i}_material"] = m["material_name"]
+        row[f"match{i}_group"] = m.get("group")
+        row[f"match{i}_score"] = round(m["score"], 4)
+        row[f"match{i}_spectrum_id"] = m["spectrum_id"]
+    u = res.get("unmixing")
+    if u:
+        row["unmixed"] = " + ".join(
+            f"{c['material_name']} {c['fraction']:.2f}" for c in u["components"]
+        )
+    return row
+
+
+def cmd_identify(args: argparse.Namespace) -> None:
+    import json
+
+    from specret.workspace import Workspace
+
+    chapters = None if [c.lower() for c in args.chapters] == ["all"] else tuple(args.chapters)
+    ws = Workspace(chapters=chapters)
+    field, scenes = _field_files(args.target)
+    try:
+        if field and scenes:
+            raise ValueError("give either field spectrum files or one scene, not both")
+        if field:
+            results = [
+                {"source": str(f), **res}
+                for f in field
+                for res in ws.identify_field(f, args.k, unmix=args.unmix)
+            ]
+        else:
+            if len(scenes) != 1:
+                raise ValueError("give one scene (file path or id from data/scenes)")
+            scene = ws.scene(scenes[0])
+            row, col = ws.locate(scene, args.row, args.col, args.lat, args.lon)
+            res = ws.identify(
+                scene.pixel(row, col), ws.sensor_for_scene(scene), args.k, unmix=args.unmix
+            )
+            results = [{"source": scenes[0], "pixel": ws.pixel_info(scene, row, col), **res}]
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}") from None
+
+    if args.csv:
+        import pandas as pd
+
+        Path(args.csv).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([_identification_row(r) for r in results]).to_csv(args.csv, index=False)
+    if args.json:
+        print(json.dumps(results, indent=2))
+        return
+    for res in results:
+        _print_identification(res)
+    if any(r["summary"].get("confidence") == "uncalibrated" for r in results):
+        print("\nno confidence model for this sensor; run `specret calibrate` to add one")
+    if args.csv:
+        print(f"\nwrote {len(results)} rows to {args.csv}")
+
+
 def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
     import numpy as np
 
@@ -249,8 +386,9 @@ def cmd_map_scene(args: argparse.Namespace) -> None:
     from specret.schema import read_library
     from specret.search.hybrid import HybridRetriever
     from specret.sensors.library import SensorLibrary
+    from specret.workspace import Workspace, open_scene
 
-    scene = _open_scene(args.scene)
+    scene = open_scene(args.scene)
     canonical = read_library(args.library)
     chapters = tuple(args.chapters) if args.chapters else None
     r = HybridRetriever(
@@ -259,8 +397,6 @@ def cmd_map_scene(args: argparse.Namespace) -> None:
         chapters=chapters,
         sff_weight=args.sff_weight,
     )
-    from specret.workspace import Workspace
-
     model = Workspace().confidence_model(r.lib.sensor.name)
     smap = map_scene(scene, r, canonical, k=args.k, confidence=model)
     out = Path(args.out or f"outputs/maps/{Path(args.scene).stem}")
@@ -270,17 +406,6 @@ def cmd_map_scene(args: argparse.Namespace) -> None:
     print(f"mapped {n:,} pixels in {smap.seconds:.0f} s -> {out}")
     print(", ".join(p.name for p in paths.values()))
     print(group_fractions(smap).head(12).round(3).to_string())
-
-
-def _open_scene(path: str):
-    """EMIT L2A granule (.nc) or AVIRIS ENVI header (.hdr)."""
-    if path.endswith(".nc"):
-        from specret.io.emit import open_emit_l2a
-
-        return open_emit_l2a(path)
-    from specret.io.aviris import open_aviris
-
-    return open_aviris(path)
 
 
 def cmd_calibrate(args: argparse.Namespace) -> None:
@@ -451,7 +576,36 @@ def main(argv: list[str] | None = None) -> None:
     x.add_argument("--qdrant-path", help="use an embedded on-disk store instead of a server")
     x.set_defaults(func=cmd_index)
 
-    q = sub.add_parser("query", help="identify a field spectrum or a scene pixel")
+    idf = sub.add_parser(
+        "identify",
+        help="identify field spectra or a scene pixel (hybrid ranking, confidence, unmixing)",
+        description="Identify materials in field spectrometer files or in one scene pixel. "
+        "The library is picked to match the input's bands, as in the viewer and MCP tools.",
+    )
+    idf.add_argument(
+        "target",
+        nargs="+",
+        help="field files (.asd, .csv, .txt, .tsv), folders or globs of them; "
+        "or one scene (EMIT .nc / AVIRIS .hdr path, or a scene id from data/scenes)",
+    )
+    idf.add_argument("--row", type=int)
+    idf.add_argument("--col", type=int)
+    idf.add_argument("--lat", type=float, help="with --lon, the nearest EMIT pixel")
+    idf.add_argument("--lon", type=float)
+    idf.add_argument("-k", type=int, default=5, help="matches to list (default 5)")
+    idf.add_argument("--unmix", action="store_true", help="also split into endmembers")
+    idf.add_argument(
+        "--chapters",
+        nargs="+",
+        default=["M", "S", "C", "V"],
+        help="library chapters to search, or 'all' (default: minerals, mixtures, coatings, "
+        "vegetation)",
+    )
+    idf.add_argument("--json", action="store_true", help="print the full results as JSON")
+    idf.add_argument("--csv", help="also write one summary row per spectrum to this CSV")
+    idf.set_defaults(func=cmd_identify)
+
+    q = sub.add_parser("query", help="baseline SAM nearest neighbours (see `identify`)")
     q.add_argument("library_npz")
     q.add_argument("--library", default=str(DEFAULT_CANONICAL))
     q.add_argument("--vector", default="sam", choices=["sam", "swir2", "cr", "cr_swir2"])

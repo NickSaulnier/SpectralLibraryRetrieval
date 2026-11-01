@@ -38,13 +38,19 @@ uv run specret make-splits                          # once: frozen sample-level 
 uv run specret validate-resampler                   # compares against USGS's own convolution
 uv run specret resample --sensor aviris_classic     # -> data/resampled/avirisc/library.npz
 uv run specret resample --sensor emit --band-file data/scenes/emit/<EMIT_L2A_RFL_...>.nc
+uv run specret identify <EMIT_L2A_RFL scene id or .nc> --lat 37.53 --lon -117.22   # or --row/--col
+uv run specret identify data/field/raw --csv outputs/field_report.csv   # .asd/.csv files, folders, globs
 uv run specret index data/resampled/avirisc/library.npz      # load into Qdrant
 uv run specret query data/resampled/emit/library.npz --emit <granule.nc> --lat 37.53 --lon -117.22
-uv run specret query data/resampled/field_asd/library.npz --field <spectrum.asd>
 uv run specret compare-l2bmin data/resampled/emit/library.npz --rfl <L2A RFL .nc> --min <L2B MIN .nc> --chapters M S C
 uv run specret noise-curve --rfl <L2A RFL .nc> --uncert <L2A RFLUNCERT .nc>   # EMIT noise model
 uv run specret benchmark data/resampled/emit/library.npz   # synthetic benchmark, frozen test split
 ```
+
+`identify` gives the same answer as the viewer and MCP tools: hybrid ranking, a calibrated
+confidence tier, absorption-feature evidence per match, and endmember fractions with `--unmix`.
+It picks the resampled library that matches the input's bands; `--json` prints everything.
+`query` is the raw SAM baseline over one search vector.
 
 Search vectors: `sam` (raw reflectance, the baseline), `swir2` (2.0–2.5 µm), `cr` and
 `cr_swir2` (continuum-removed band depth). The default retriever, `hybrid`, fuses `sam`, `cr`

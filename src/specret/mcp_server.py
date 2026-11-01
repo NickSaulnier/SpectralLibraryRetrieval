@@ -73,17 +73,10 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
     ) -> dict:
         """Identify the material at one scene pixel, by (row, col) or by (lat, lon)."""
         scene = ws.scene(scene_id)
-        if lat is not None and lon is not None:
-            if not hasattr(scene, "nearest_pixel"):
-                raise ValueError("lat/lon lookup needs an EMIT scene; give row and col")
-            row, col = scene.nearest_pixel(lat, lon)
-        if row is None or col is None:
-            raise ValueError("give row and col, or lat and lon")
+        row, col = ws.locate(scene, row, col, lat, lon)
         sensor = ws.sensor_for_scene(scene)
         out = ws.identify(scene.pixel(row, col), sensor, k)
-        out["pixel"] = {"row": row, "col": col}
-        if hasattr(scene, "lat"):
-            out["pixel"].update(lat=float(scene.lat[row, col]), lon=float(scene.lon[row, col]))
+        out["pixel"] = ws.pixel_info(scene, row, col)
         return jsonable(out)
 
     @mcp.tool
@@ -99,13 +92,10 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
         Also returns the best single match and its calibrated confidence for comparison.
         """
         scene = ws.scene(scene_id)
-        if lat is not None and lon is not None:
-            row, col = scene.nearest_pixel(lat, lon)
-        if row is None or col is None:
-            raise ValueError("give row and col, or lat and lon")
+        row, col = ws.locate(scene, row, col, lat, lon)
         sensor = ws.sensor_for_scene(scene)
         out = ws.identify(scene.pixel(row, col), sensor, k=3, unmix=True)
-        out["pixel"] = {"row": row, "col": col}
+        out["pixel"] = ws.pixel_info(scene, row, col)
         return jsonable(out)
 
     @mcp.tool

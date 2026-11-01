@@ -157,14 +157,7 @@ def test_viewer_field_upload(workspace_root):
     from specret.workspace import Workspace
 
     ws = Workspace(root=workspace_root, chapters=None)
-    # The upload path resamples to the field sensor; reuse the toy library under that name.
-    (workspace_root / "data/resampled/field_asd").mkdir(parents=True)
-    lib = SensorLibrary.load(workspace_root / "data/resampled/emit/library.npz")
-    SensorLibrary(
-        Sensor("field_asd", WL, lib.sensor.fwhm_nm, lib.sensor.good_mask),
-        lib.spectrum_ids,
-        lib.matrix,
-    ).save(workspace_root / "data/resampled/field_asd/library.npz")
+    _add_field_library(workspace_root)  # the upload path resamples to the field sensor
     client = TestClient(create_app(ws))
     assert "Spectral Match Viewer" in client.get("/").text
     assert client.get("/api/scenes").json() == []
@@ -183,3 +176,70 @@ def test_viewer_field_upload(workspace_root):
         ).status_code
         == 400
     )
+
+
+def _add_field_library(root: Path) -> None:
+    """Reuse the toy library under the field sensor's name."""
+    lib = SensorLibrary.load(root / "data/resampled/emit/library.npz")
+    SensorLibrary(
+        Sensor("field_asd", WL, lib.sensor.fwhm_nm, lib.sensor.good_mask),
+        lib.spectrum_ids,
+        lib.matrix,
+    ).save(root / "data/resampled/field_asd/library.npz")
+
+
+def test_cli_identify_field(workspace_root, monkeypatch, capsys):
+    import json
+
+    import pandas as pd
+
+    from specret.cli import main
+
+    _add_field_library(workspace_root)
+    field = workspace_root / "field"
+    field.mkdir()
+    for name in ("Kaolinite", "Calcite"):
+        rows = "\n".join(f"{w},{v}" for w, v in zip(WL, 0.8 * MATERIALS[name], strict=True))
+        (field / f"{name.lower()}.csv").write_text(f"wavelength,{name}\n{rows}\n")
+    monkeypatch.chdir(workspace_root)
+
+    main(["identify", "field", "--chapters", "all", "--csv", "out/report.csv"])
+    text = capsys.readouterr().out
+    assert "kaolin" in text and "calcite" in text and "wrote 2 rows" in text
+    report = pd.read_csv("out/report.csv")
+    assert list(report["best_group"]) == ["calcite", "kaolin"]  # files in sorted order
+
+    main(["identify", "field/*.csv", "--chapters", "all", "--json", "-k", "2"])
+    results = json.loads(capsys.readouterr().out)
+    assert len(results) == 2 and all(len(r["matches"]) == 2 for r in results)
+
+    with pytest.raises(SystemExit, match="no such file"):
+        main(["identify", "missing.asd"])
+
+
+def test_cli_identify_scene_pixel(workspace_root, monkeypatch, capsys):
+    import specret.workspace
+    from specret.cli import main
+    from specret.io.emit import EmitScene
+
+    class GeoScene(FakeScene):
+        nearest_pixel = EmitScene.nearest_pixel
+
+    scene_file = workspace_root / "data/scenes/emit/EMIT_L2A_RFL_fake.nc"
+    scene_file.parent.mkdir(parents=True)
+    scene_file.touch()
+    monkeypatch.setattr(specret.workspace, "open_scene", lambda path: GeoScene())
+    monkeypatch.chdir(workspace_root)
+
+    # Pixel (0, 2) holds Calcite (see FakeScene); the scene is named by id, not path.
+    main(["identify", "EMIT_L2A_RFL_fake", "--row", "0", "--col", "2", "--chapters", "all"])
+    text = capsys.readouterr().out
+    assert "pixel row 0, col 2" in text and "best match: Calcite" in text
+
+    main(["identify", "EMIT_L2A_RFL_fake", "--lat", "37.599", "--lon", "-117.299", "--unmix"])
+    assert "pixel row 1, col 1" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit, match="outside"):
+        main(["identify", "EMIT_L2A_RFL_fake", "--row", "9", "--col", "0"])
+    with pytest.raises(SystemExit, match="give row and col"):
+        main(["identify", "EMIT_L2A_RFL_fake"])

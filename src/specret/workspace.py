@@ -93,18 +93,16 @@ class Workspace:
             return self._retrievers[sensor]
 
     def scene(self, scene_id: str):
+        """A scene by id (file stem under data/scenes) or by path to its .nc / .hdr file."""
         if scene_id not in self._scenes:
             info = self.scenes().get(scene_id)
-            if info is None:
-                raise ValueError(f"unknown scene '{scene_id}'; have {sorted(self.scenes())}")
-            if info.kind == "emit":
-                from specret.io.emit import open_emit_l2a
-
-                self._scenes[scene_id] = open_emit_l2a(info.path)
+            if info is not None:
+                path = info.path
+            elif Path(scene_id).is_file():
+                path = Path(scene_id)
             else:
-                from specret.io.aviris import open_aviris
-
-                self._scenes[scene_id] = open_aviris(info.path)
+                raise ValueError(f"unknown scene '{scene_id}'; have {sorted(self.scenes())}")
+            self._scenes[scene_id] = open_scene(path)
         return self._scenes[scene_id]
 
     def sensor_for_scene(self, scene) -> str:
@@ -114,7 +112,33 @@ class Workspace:
             sc = np.asarray(scene.centers_nm)
             if c.shape == sc.shape and np.allclose(c, sc, atol=0.5):
                 return name
-        raise ValueError("no resampled library matches this scene; run `specret resample`")
+        path = getattr(scene, "path", None) or getattr(scene, "hdr_path", "<scene file>")
+        cfg = "emit" if str(path).endswith(".nc") else "aviris_classic"
+        raise ValueError(
+            "no resampled library matches this scene's bands; run "
+            f"`specret resample --sensor {cfg} --band-file {path}`"
+        )
+
+    @staticmethod
+    def locate(scene, row=None, col=None, lat=None, lon=None) -> tuple[int, int]:
+        """Swath (row, col) from either a row/col pair or a lat/lon pair."""
+        if lat is not None and lon is not None:
+            if not hasattr(scene, "nearest_pixel"):
+                raise ValueError("lat/lon lookup needs an EMIT scene; give row and col")
+            return scene.nearest_pixel(lat, lon)
+        if row is None or col is None:
+            raise ValueError("give row and col, or lat and lon")
+        rows, cols = scene.shape
+        if not (0 <= row < rows and 0 <= col < cols):
+            raise ValueError(f"pixel ({row}, {col}) is outside the {rows} x {cols} scene")
+        return row, col
+
+    @staticmethod
+    def pixel_info(scene, row: int, col: int) -> dict:
+        info = {"row": int(row), "col": int(col)}
+        if hasattr(scene, "lat"):
+            info.update(lat=float(scene.lat[row, col]), lon=float(scene.lon[row, col]))
+        return info
 
     # --- operations ------------------------------------------------------------------
 
@@ -200,7 +224,7 @@ class Workspace:
             }
         )
 
-    def identify_field(self, path: str | Path, k: int = 5) -> list[dict]:
+    def identify_field(self, path: str | Path, k: int = 5, unmix: bool = False) -> list[dict]:
         from specret.io.field import read_field
         from specret.sensors import load_sensor
 
@@ -211,8 +235,19 @@ class Workspace:
             refl = splice_correct(spec.wavelength_nm, spec.reflectance)
             native = np.interp(spec.wavelength_nm, field_cfg.centers_nm, field_cfg.fwhm_nm)
             x = self.to_sensor(spec.wavelength_nm, refl, sensor, native_fwhm_nm=native)
-            out.append({"name": spec.name, **self.identify(x, sensor, k)})
+            out.append({"name": spec.name, **self.identify(x, sensor, k, unmix=unmix)})
         return out
+
+
+def open_scene(path: str | Path):
+    """EMIT L2A granule (.nc) or AVIRIS ENVI header (.hdr)."""
+    if str(path).endswith(".nc"):
+        from specret.io.emit import open_emit_l2a
+
+        return open_emit_l2a(path)
+    from specret.io.aviris import open_aviris
+
+    return open_aviris(path)
 
 
 CONFIDENT = 0.5  # calibrated P(best group is right) at or above which the answer stands
