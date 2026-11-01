@@ -116,7 +116,8 @@ src/specret/
     hitran_xsc.py             # HITRAN absorption cross-sections (VOCs, C2H6 VSWIR)
     wind.py                   # MERRA-2 / HRRR (+ keyless ERA5 cross-check) 10 m wind at a point and time
   gas/
-    library.py                # -> data/canonical/gas_library.parquet (gas, grid, cross-section, T, P, source)
+    library.py                # HITRAN line-by-line cross-sections per layer -> data/derived/gas/lbl_<range>.npz
+    detect.py                 # scene pipeline: windows, targets, screens, matched filter, outputs
     signatures.py             # unit absorption spectra per scene: VSWIR (AMF, H2O LUT), LWIR (thermal contrast)
     matched_filter.py         # column-wise robust mean/cov (torch), MF, ACE, two-pass plume exclusion
     identify.py               # joint multi-gas + confuser fit, BIC selection, calibrated confidence
@@ -198,6 +199,15 @@ Still open:
 **Exit:** the scenes, references, spectroscopy and wind access are all on disk or working, with the manifest updated.
 
 ### Phase G1: VSWIR methane matched filter on EMIT (2 weekends)
+
+**Status (2026-11-01): done.** All exit criteria pass; details in `results/gas_g1_ch4_mf.md`.
+- **Agreement:** across 3 plume scenes, r over plumes is 0.93–0.97 and the Deming slope is 0.95–1.03.
+- **Speed:** 11–14 s per scene.
+- **Noise:** our background is about 30% lower than EMIT's, because of leave-one-out shrinkage on centred data, checked with injected plumes.
+- **Deviations from the layout below:**
+  - EMIT v002's wide band ranges (500–1340, 1500–1790, 1950–2450 nm) replace a CH4-only window;
+  - the line-by-line cache is an npz per range in `data/derived/gas/`, not a parquet;
+  - the pipeline lives in `gas/detect.py`, with the CLI commands `gas-library`, `detect-plumes` and `compare-ghg`.
 
 - `io/emit_l1b.py`, `gas/library.py` (HITRAN only), `gas/signatures.py` (VSWIR) and `gas/matched_filter.py` (GPU, column-wise, two-pass).
 - `detect-plumes` writes `ch4_enh.tif`.

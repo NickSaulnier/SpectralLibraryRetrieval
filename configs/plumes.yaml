@@ -1,0 +1,23 @@
+# Plume detection settings (PLAN_GAS.md). Wavelengths in nm.
+
+matched_filter:
+  # Bands used by the matched filter, as [lo, hi] ranges. They are much wider than the diagnostic
+  # windows in gases.yaml: bands without gas absorption still describe the background, which
+  # lowers the noise. These are the ranges of the EMIT GHG v002 products. Line-by-line spectra
+  # are computed where HITRAN tables cover a range (1493-2532 nm); elsewhere k is taken as 0.
+  windows:
+    CH4: [[500, 1340], [1500, 1790], [1950, 2450]]
+    CO2: [[500, 1340], [1500, 1790], [1950, 2450]]
+  shrinkage: loo       # covariance shrinkage: "loo" (leave-one-out per column) or a fixed 0-1
+  n_pass: 2            # 2 = recompute the background without first-pass plume pixels
+  exclude_sigma: 3.0   # second pass: drop pixels above this many robust sigmas from the statistics
+  min_pixels_factor: 2 # a column needs at least this many valid pixels per band, or it is left empty
+  flare_radiance: 1.5  # radiance at 2389 nm above which a pixel is a flare (uW/cm2/sr/nm), as EMIT
+  flare_dilation_px: 2 # flares are screened with this margin
+
+# Line-by-line spectroscopy used to build the unit absorption spectra (gas/library.py).
+library:
+  step_cm1: 0.01
+  wing_cm1: 25.0
+  margin_nm: 30.0      # computed beyond each window, so band responses near its edges are complete
+  background_gases: [H2O, CO2, CH4]

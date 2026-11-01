@@ -352,6 +352,67 @@ def cmd_compare_l2bmin(args: argparse.Namespace) -> None:
             df.to_parquet(Path(args.out) / f"l2bmin_compare_{vector}{suffix}.parquet")
 
 
+def cmd_gas_library(args: argparse.Namespace) -> None:
+    from specret.gas.library import build_window, lbl_ranges, plume_config, window_path
+
+    windows = plume_config()["matched_filter"]["windows"]
+    for gas in args.gases:
+        for lo, hi in lbl_ranges(windows[gas]):
+            lbl = build_window(lo, hi, force=args.force)
+            print(
+                f"{gas} {lo:.0f}-{hi:.0f} nm: {lbl.nu_cm1.size} points, {sorted(lbl.sigma)} "
+                f"-> {window_path(lo, hi)}"
+            )
+
+
+def cmd_detect_plumes(args: argparse.Namespace) -> None:
+    import numpy as np
+
+    from specret.gas.detect import detect, write_enhancement
+    from specret.io.emit_l1b import find_l1b, open_emit_l1b
+
+    for s in args.scenes:
+        scene = open_emit_l1b(find_l1b(s))
+        enh = detect(scene, args.gas)
+        path = write_enhancement(scene, enh, Path(args.out))
+        sig = np.nanmedian(enh.result.sigma)
+        print(
+            f"{scene.scene_id}: {path} ({enh.seconds:.0f} s, background sigma "
+            f"{sig:.0f} ppm m, AMF {enh.conditions.amf:.2f}, H2O "
+            f"{enh.conditions.h2o_gcm2:.2f} g/cm2)"
+        )
+
+
+def cmd_compare_ghg(args: argparse.Namespace) -> None:
+    import json
+
+    from specret.eval.ghg_compare import compare
+    from specret.io.emit_l1b import find_l1b, scene_id
+
+    rows = []
+    for s in args.scenes:
+        l1b = find_l1b(s)
+        sid = scene_id(l1b)
+        ours = Path(args.out) / sid / f"{args.gas.lower()}_enh.tif"
+        r = compare(ours, l1b.parent, sid, args.gas)
+        rows.append(r)
+        p, a = r["plume_pixels"], r["scene_pixels"]
+        plume = (
+            f"plumes n={p['n']} r={p['r']:.3f} slope={p['deming_slope']:.3f} "
+            f"(OLS {p['slope']:.3f}) bias={p['mean_diff']:.0f}"
+            if "r" in p
+            else f"plumes n={p['n']}"
+        )
+        print(
+            f"{sid}: {plume}; scene r={a['r']:.3f} slope={a['slope']:.3f}; background "
+            f"sigma ours {r['background_sigma_ours']:.0f}, EMIT "
+            f"{r['background_sigma_emit']:.0f} ppm m"
+        )
+    if args.json:
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json).write_text(json.dumps(rows, indent=1))
+
+
 def cmd_make_splits(args: argparse.Namespace) -> None:
     from specret.eval.splits import load_split_config, make_splits, write_splits
     from specret.schema import read_library
@@ -787,6 +848,29 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--encoder", help="encoder checkpoint for learned methods")
     c.add_argument("--out", help="folder for per-pixel results (parquet)")
     c.set_defaults(func=cmd_compare_l2bmin)
+
+    gl = sub.add_parser("gas-library", help="line-by-line gas cross-sections from HITRAN")
+    gl.add_argument("--gases", nargs="+", default=["CH4"], help="matched-filter windows to build")
+    gl.add_argument("--force", action="store_true", help="recompute even if cached")
+    gl.set_defaults(func=cmd_gas_library)
+
+    dp = sub.add_parser(
+        "detect-plumes",
+        help="gas enhancement map (ppm m) from EMIT L1B radiance",
+        description="Column-wise matched filter on EMIT L1B radiance. Writes <gas>_enh.tif "
+        "(orthorectified) and <gas>_enh.json to outputs/gas/<scene id>/.",
+    )
+    dp.add_argument("scenes", nargs="+", help="EMIT scene ids or L1B RAD granule paths")
+    dp.add_argument("--gas", default="CH4", choices=["CH4", "CO2"])
+    dp.add_argument("--out", default="outputs/gas")
+    dp.set_defaults(func=cmd_detect_plumes)
+
+    cg = sub.add_parser("compare-ghg", help="agreement with EMIT L2B CH4ENH/CO2ENH")
+    cg.add_argument("scenes", nargs="+", help="scene ids already run through detect-plumes")
+    cg.add_argument("--gas", default="CH4", choices=["CH4", "CO2"])
+    cg.add_argument("--out", default="outputs/gas", help="where detect-plumes wrote its maps")
+    cg.add_argument("--json", help="write the metrics to this file")
+    cg.set_defaults(func=cmd_compare_ghg)
 
     dr = sub.add_parser("doctor", help="show what is set up and what to run next")
     dr.set_defaults(func=cmd_doctor)
