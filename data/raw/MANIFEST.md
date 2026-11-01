@@ -52,7 +52,7 @@ One entry per source: where it came from, version, when it was fetched, and its 
 
 ### Wind (for emission rates)
 - **HRRR:** NOAA's public cloud bucket through `herbie`, no account. Tested 2026-10-31: 10 m wind at the Permian scene's overpass hour reads correctly
-- **MERRA-2** (`M2T1NXSLV`, GES DISC): returns 403 Forbidden with the current Earthdata login until the account authorizes the GES DISC archive (see below)
+- **MERRA-2** (`M2T1NXSLV`, GES DISC): works with the Earthdata login since the GES DISC archive was approved (2026-11-01). Tested: 10 m wind at the Permian scene, 2023-06-08 16:30 UTC, 1.5 m/s (HRRR: 2.0 m/s)
 - **Keyless ERA5** (Google ARCO zarr): not verified. Opening the full store took over 10 min and was stopped. Try the Open-Meteo historical API instead when the cross-check is built.
 - Nothing is downloaded in bulk: wind is read per scene and hour when quantifying
 
@@ -76,13 +76,10 @@ One entry per source: where it came from, version, when it was fetched, and its 
 - **Source:** USGS Spectroscopy Lab publications (Clark, Swayze et al.); availability not yet confirmed
 - **Put in:** `data/refmaps/`
 
-### MERRA-2 access (GES DISC)
-- **What:** in your Earthdata profile (urs.earthdata.nasa.gov → Applications → Authorized Apps), approve "NASA GESDISC DATA ARCHIVE". MERRA-2 reads then work with the existing login.
-
-### PNNL gas-phase infrared database (LWIR gas library)
-- **Source:** PNNL Northwest-Infrared (nwir.pnl.gov); historically a paid licence, with redistribution restricted
-- **Status:** not fetched. Whether to buy it is open. The free fallback is the HITRAN cross-section database, which includes many PNNL-derived spectra
-- **Put in:** `data/raw/pnnl/` (gitignored, never committed)
+### HITRAN cross-sections (LWIR VOCs, C2H6 in VSWIR)
+- **Source:** hitran.org cross-section database (free; many spectra derive from PNNL). The paid PNNL database itself is not used
+- **Status:** not fetched yet; needed by Phase G4
+- **Put in:** `data/raw/hitran/xsc/`
 
 ### Controlled methane releases with EMIT overpasses
 - **Source:** Stanford one-year single-blind test (Reuland, Brandt et al., Nature 2026, doi 10.1038/s41586-026-11115-0), Casa Grande, Arizona, 2024–2025; EMIT is among the tested instruments

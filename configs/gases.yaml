@@ -1,5 +1,5 @@
 # Gas registry for plume work (PLAN_GAS.md). One entry per gas:
-#   hitran_id   HITRAN molecule number (line lists via HAPI); null = cross-sections only (PNNL)
+#   hitran_id   HITRAN molecule number (line lists via HAPI); null = HITRAN cross-sections only
 #   molar_mass  g/mol, for converting ppm·m to kg
 #   vswir/lwir  diagnostic windows in nm; an empty list means the gas is not used in that range
 #   quantify    which ranges report a column and emission rate; elsewhere the gas is flag-only

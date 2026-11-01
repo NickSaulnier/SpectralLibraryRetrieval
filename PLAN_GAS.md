@@ -27,7 +27,7 @@ The mineral tool asks "which library spectrum does this pixel look like?" That q
 
 1. **Gases are detected in radiance, not reflectance.** Atmospheric correction (EMIT L2A, ISOFIT) treats extra methane as part of the atmosphere or leaves it as an unexplained residual, so the plume signal is partly removed from L2A. Gas work starts from **L1B at-sensor radiance**, which means new loaders.
 2. **A plume is a small perturbation, not a material.** A strong methane plume changes SWIR radiance by a few percent. The surface, not the gas, dominates the spectrum. The standard approach is therefore **target detection**: a matched filter that whitens the pixel against the scene's own background statistics and projects it onto the gas's absorption signature. Nearest-neighbour library search doesn't apply.
-3. **The library holds absorption coefficients, not reflectance spectra.** Gas signatures come from HITRAN line lists and absorption cross-sections (and, for LWIR, the PNNL infrared database). They're turned into a sensor-specific **unit absorption spectrum** for each scene's viewing geometry, temperature and pressure. This is a per-scene target vector, not a fixed library row.
+3. **The library holds absorption coefficients, not reflectance spectra.** Gas signatures come from HITRAN line lists and absorption cross-sections (free sources only; the paid PNNL database is not used). They're turned into a sensor-specific **unit absorption spectrum** for each scene's viewing geometry, temperature and pressure. This is a per-scene target vector, not a fixed library row.
 4. **Identification is a joint fit, not a ranking.** Overlapping absorbers (CH4 with water vapour and ethane near 2.3 µm; CO2 with water near 2.0 µm; many gases share the 8–12 µm LWIR window) have to be fitted together. That's structurally the same problem as Phase 4 unmixing: a sparse non-negative fit with model selection. The mineral library also returns as a source of **confusers**, because surface materials such as carbonates, hydrocarbon-bearing surfaces and plastics have absorption near 2.3 µm and are the main source of false methane plumes.
 
 Reused as is or nearly so:
@@ -82,7 +82,7 @@ So the target for gas g is t_g = τ_a · (B(T_p) − μ) ⊙ σ_g. This differs 
 2. **Plume temperature** is taken as near-surface air temperature, from weather data or a scene-supplied value. It's a key source of uncertainty in quantification.
 3. **Atmospheric terms** (τ_a, L_a↑): HyTES flies low, so they're small. They're estimated in-scene, with ISAC-style blackbody-pixel fitting, or taken from the HyTES L2 products.
 
-LWIR targets: SO2, NH3, CH4 (7.7 µm), N2O, and VOCs available in PNNL (for example ethylene, propylene, benzene, ammonia derivatives, SF6, freons). This is where identification really is a **library problem**: tens to hundreds of candidate gases with overlapping bands.
+LWIR targets: SO2, NH3, CH4 (7.7 µm), N2O, and VOCs with HITRAN cross-sections (for example ethylene, propylene, benzene, ammonia derivatives, SF6, freons). This is where identification really is a **library problem**: tens to hundreds of candidate gases with overlapping bands.
 
 ### 1.3 Quantification (both ranges)
 
@@ -113,7 +113,7 @@ src/specret/
     hytes.py                  # HyTES L1 radiance, L2 LST/emissivity
     emit_ghg.py               # EMIT L2B CH4ENH/CO2ENH rasters and CH4PLM/CO2PLM plume complexes (references)
     hitran.py                 # HAPI line-list fetch + cache -> data/raw/hitran/
-    pnnl.py                   # PNNL gas-phase IR cross-sections (manual download; see risks)
+    hitran_xsc.py             # HITRAN absorption cross-sections (VOCs, C2H6 VSWIR)
     wind.py                   # MERRA-2 / HRRR (+ keyless ERA5 cross-check) 10 m wind at a point and time
   gas/
     library.py                # -> data/canonical/gas_library.parquet (gas, grid, cross-section, T, P, source)
@@ -169,11 +169,11 @@ Effort assumes part-time work, as in PLAN.md. G1–G3 give a usable VSWIR methan
 - **EMIT:** seven scenes in `configs/gas_scenes.yaml`, fetched with `specret download emit-gas`: three CH4 plume scenes, two CO2 plume scenes, and Mountain Pass and Cuprite as no-plume scenes. All use L1B/L2A v001 and GHG v002.
 - **HyTES:** Salton Sea, Kern River and Chino flights, fetched with `scripts/download_g0_hytes.py`. ORNL DAAC accepts the Earthdata login.
 - **HITRAN:** line lists for 10 gases, fetched with `specret download hitran`.
-- **Wind:** HRRR works with no account. The keyless ERA5 cross-check is not verified yet.
+- **Wind:** HRRR works with no account. MERRA-2 works through the Earthdata login (GES DISC approved 2026-11-01; Permian 2023-06-08 16:30 UTC reads 1.5 m/s against HRRR's 2.0 m/s). The keyless ERA5 cross-check is not verified yet.
+- **PNNL:** not used. Nothing is bought; the LWIR library is HITRAN line lists plus HITRAN cross-sections.
 
 Still open:
-- MERRA-2 needs the GES DISC app approved in the Earthdata profile.
-- Whether to buy the PNNL library is undecided (free fallback: HITRAN cross-sections).
+- HITRAN cross-section files (VOCs, C2H6 in VSWIR) are not fetched yet; they are needed by G4.
 - No public per-release table with EMIT overpasses has been found yet.
 - AVIRIS-NG radiance is deferred to G5 (open question 2).
 
@@ -191,7 +191,7 @@ Still open:
 - **HyTES:** sample flights with published gas detections, from the HyTES data portal. Candidates include CH4 from oil fields and dairies, NH3 from feedlots, and SO2 and NH3 from Salton Sea geothermal fumaroles. Verify availability first, because **this is the riskiest data item**.
 - **Spectroscopy:**
   - HITRAN line lists through HAPI for CH4, CO2, H2O, N2O, NH3, H2S, CO, C2H6 and SO2;
-  - PNNL cross-sections for the LWIR set (register on the site and download by hand).
+  - HITRAN cross-sections for gases without line lists (VOCs, C2H6 in VSWIR).
 - **Wind:** check that `earthaccess` can fetch MERRA-2 `M2T1NXSLV` for one scene's overpass hour, and that `herbie` can fetch HRRR for a US scene. No new account is needed.
 - Update `data/raw/MANIFEST.md` with sources, DOIs and licences.
 
@@ -257,11 +257,11 @@ Still open:
 ### Phase G4: LWIR (HyTES) (3–5 weeks)
 
 - **Data and sensors:** `io/hytes.py`, `configs/sensors/hytes.yaml`, and LWIR bad bands.
-- **Library:** `gas/library.py` gains PNNL cross-sections, resampled with the existing resampler at the HyTES band centres and FWHM.
+- **Library:** `gas/library.py` gains HITRAN cross-sections, resampled with the existing resampler at the HyTES band centres and FWHM.
 - **Signatures:** `gas/signatures.py` gains the LWIR thermal-contrast target, using the HyTES L2 LST and emissivity for L_bg and weather-data air temperature for T_p. ΔT and low-contrast masks go to the outputs.
 - **Detection:** the same matched filter (it's domain-agnostic once t is built), run once per gas in the registry.
 - **Identification** is now a real library search over many gases. For each candidate plume:
-  1. **Retrieve:** rank all PNNL gases by whitened correlation with the plume's mean residual. This is the analogue of `gpu_exact`, and it's cheap.
+  1. **Retrieve:** rank all library gases by whitened correlation with the plume's mean residual. This is the analogue of `gpu_exact`, and it's cheap.
   2. **Fit:** a joint non-negative fit over the top-N plus H2O and O3 with BIC, as in G2.
   3. **Score** with the calibrated combiner. Held-out gases are used for open-set calibration, mirroring Phase 4's held-out classes.
 - **Quantification:** column density from α̂ / (B(T_p) − L_bg). Emission rate where wind is available, with the T_p uncertainty added to the budget.
@@ -303,7 +303,7 @@ The L2B products and catalogues come from JPL's own matched filter. As with Tetr
 | Risk | Impact | Mitigation |
 |---|---|---|
 | HyTES data is sparse, hard to find, or lacks published gas labels | G4 has weak validation | Check availability in G0, before writing any LWIR code. Fall back on injected plumes and any published HyTES case studies, and keep G4 explicitly provisional |
-| PNNL database licence forbids redistribution | Can't ship the LWIR library | Keep it in `data/raw/pnnl/` (gitignored); users download it themselves; `doctor` explains. HITRAN cross-sections cover a subset as a fallback |
+| No PNNL (not buying it) | Fewer LWIR gases than PNNL offers | Use HITRAN cross-sections, which include many PNNL-derived spectra; report gases outside the library as unidentified |
 | Wind error dominates the emission rate | Wide uncertainty bars | Report it honestly in the budget; allow user wind; prefer HRRR over MERRA-2 in the US; use the spread between sources as part of the wind uncertainty |
 | Surface confusers (carbonate, hydrocarbons) create false CH4 plumes | Loss of trust | Joint fit with confuser terms plus the mineral-map screen (G2), and a dedicated no-plume test scene |
 | L1B volume (~2 GB/scene) and memory | Slow or out-of-memory runs | Stream by row blocks, as the mineral mapper does; column statistics need only one pass over the cube |
