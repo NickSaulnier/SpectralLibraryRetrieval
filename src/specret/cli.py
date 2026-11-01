@@ -25,6 +25,26 @@ def cmd_download(args: argparse.Namespace) -> None:
             limit=args.limit,
         )
         print(f"downloaded {len(files)} files")
+    elif args.source == "hitran":
+        from specret.io.hitran import fetch_lines
+
+        for p in fetch_lines(args.gases, out_dir=Path(args.out or "data/raw/hitran")):
+            print(f"{p}  {p.stat().st_size / 1e6:.1f} MB")
+    elif args.source == "emit-gas":
+        import yaml
+
+        cfg = yaml.safe_load(Path(args.scene_list).read_text())
+        scenes = cfg["scenes"]
+        if args.scenes:
+            scenes = [s for s in scenes if s["id"] in args.scenes]
+        if args.dry_run:
+            for s in scenes:
+                for u in download.emit_scene_urls(s["id"], args.gas_products or s["products"]):
+                    print(u)
+            return
+        out = Path(args.out or cfg["out_dir"])
+        files = download.download_emit_scenes(scenes, out, args.gas_products)
+        print(f"{len(files)} files in {out}")
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
@@ -550,8 +570,10 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="specret", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
 
-    d = sub.add_parser("download", help="download USGS splib07 sets or EMIT granules")
-    d.add_argument("source", choices=["usgs", "emit"])
+    d = sub.add_parser(
+        "download", help="download USGS splib07 sets, EMIT granules or HITRAN line lists"
+    )
+    d.add_argument("source", choices=["usgs", "emit", "emit-gas", "hitran"])
     d.add_argument("--sets", nargs="+", default=["splib07a", "splib07b_cvAVIRISc2014"])
     d.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"))
     d.add_argument("--start", default="2022-08-01")
@@ -559,6 +581,11 @@ def main(argv: list[str] | None = None) -> None:
     d.add_argument("--products", nargs="+", default=["EMITL2ARFL", "EMITL2BMIN"])
     d.add_argument("--limit", type=int)
     d.add_argument("--out")
+    d.add_argument("--scene-list", default="configs/gas_scenes.yaml", help="emit-gas: scene list")
+    d.add_argument("--scenes", nargs="+", help="emit-gas: only these scene ids")
+    d.add_argument("--gas-products", nargs="+", help="emit-gas: override each scene's product list")
+    d.add_argument("--dry-run", action="store_true", help="emit-gas: print URLs only")
+    d.add_argument("--gases", nargs="+", help="hitran: only these gases (configs/gases.yaml)")
     d.set_defaults(func=cmd_download)
 
     i = sub.add_parser("ingest", help="parse raw libraries into the canonical parquet")

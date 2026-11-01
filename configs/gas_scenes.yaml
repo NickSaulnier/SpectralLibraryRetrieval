@@ -1,0 +1,55 @@
+# EMIT scenes for gas plume work (PLAN_GAS.md, Phase G0).
+# Chosen 2026-10-31 by ranking scenes on the number of EMIT L2B CH4PLM / CO2PLM plume
+# complexes they contain (CMR metadata), then preferring low cloud and low solar zenith.
+# Versions are the newest set that exists for every scene: L1B/L2A/L2B MIN v001 and the
+# GHG products v002 (the v003 enhancement products do not cover these granules).
+#
+# `products` keys are defined in specret.io.download.EMIT_PRODUCTS. The no-plume scenes
+# already have L2A RFL and L2B MIN under data/scenes, so they only need radiance and the
+# enhancement maps.
+
+out_dir: data/scenes/emit_gas
+
+scenes:
+  - id: 20230608T162322_2315911_014
+    site: Permian Basin, Texas (Delaware sub-basin)
+    role: plume
+    gases: [CH4]
+    notes: 7 CH4 plume complexes; cloud 19%; SZA 34
+    products: [l1b, l2a, min, ch4enh, co2enh, ch4plm]
+  - id: 20230608T162334_2315911_015
+    site: Permian Basin, Texas (Midland sub-basin)
+    role: plume
+    gases: [CH4]
+    notes: 7 CH4 plume complexes; next segment of the same orbit; cloud 15%; SZA 33
+    products: [l1b, l2a, min, ch4enh, co2enh, ch4plm]
+  - id: 20230620T084414_2317106_010
+    site: Western Turkmenistan (oil and gas fields)
+    role: plume
+    gases: [CH4]
+    notes: 17 CH4 plume complexes (super-emitters); cloud 8%; SZA 16
+    products: [l1b, l2a, min, ch4enh, co2enh, ch4plm]
+  - id: 20230610T022742_2316102_014
+    site: Ningxia, China (power plants and industry)
+    role: plume
+    gases: [CO2]
+    notes: 11 CO2 plume complexes; cloud 3%; SZA 34
+    products: [l1b, l2a, min, ch4enh, co2enh, co2plm]
+  - id: 20240402T052203_2409304_003
+    site: Madhya Pradesh, India (power plants and cement)
+    role: plume
+    gases: [CO2]
+    notes: 7 CO2 plume complexes; cloud 3%; SZA 27
+    products: [l1b, l2a, min, ch4enh, co2enh, co2plm]
+  - id: 20240416T210255_2410714_015
+    site: Mountain Pass, California (carbonatite)
+    role: no_plume
+    gases: []
+    notes: no CH4PLM/CO2PLM; bright carbonates, the main CH4 false-positive confuser
+    products: [l1b, ch4enh, co2enh]
+  - id: 20240727T213005_2420914_007
+    site: Cuprite, Nevada (alteration minerals, calcite)
+    role: no_plume
+    gases: []
+    notes: no CH4PLM/CO2PLM; the mineral pipeline's test scene
+    products: [l1b, ch4enh, co2enh]

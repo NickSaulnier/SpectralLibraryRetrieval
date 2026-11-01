@@ -85,3 +85,79 @@ def download_emit(
         results = results[:limit]
     out_dir.mkdir(parents=True, exist_ok=True)
     return earthaccess.download(results, str(out_dir))
+
+
+# Per-scene EMIT products for gas work (configs/gas_scenes.yaml): key -> (short name,
+# version, file-name prefixes to keep). Plume complexes (`*plm`) are separate granules
+# that name their source scene in metadata; all of their files are kept.
+EMIT_PRODUCTS = {
+    "l1b": ("EMITL1BRAD", "001", ("EMIT_L1B_RAD_", "EMIT_L1B_OBS_")),
+    "l2a": ("EMITL2ARFL", "001", ("EMIT_L2A_RFL_", "EMIT_L2A_MASK_")),
+    "min": ("EMITL2BMIN", "001", ("EMIT_L2B_MIN_",)),
+    "ch4enh": ("EMITL2BCH4ENH", "002", ("EMIT_L2B_CH4",)),
+    "co2enh": ("EMITL2BCO2ENH", "002", ("EMIT_L2B_CO2",)),
+    "ch4plm": ("EMITL2BCH4PLM", "002", ("",)),
+    "co2plm": ("EMITL2BCO2PLM", "002", ("",)),
+}
+
+
+def _scene_window(scene_id: str) -> tuple[str, str]:
+    """A three-minute search window starting at the scene's timestamp (YYYYMMDDTHHMMSS_...)."""
+    from datetime import datetime, timedelta
+
+    t = datetime.strptime(scene_id[:15], "%Y%m%dT%H%M%S")
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return (t - timedelta(minutes=1)).strftime(fmt), (t + timedelta(minutes=2)).strftime(fmt)
+
+
+def _source_scenes(granule) -> str:
+    for a in granule["umm"].get("AdditionalAttributes", []):
+        if a["Name"] == "SOURCE_SCENES":
+            return " ".join(a["Values"])
+    return ""
+
+
+def emit_scene_urls(scene_id: str, products: list[str]) -> list[str]:
+    """Data URLs for one EMIT scene's products (search needs no login)."""
+    import earthaccess
+
+    urls = []
+    for key in products:
+        if key not in EMIT_PRODUCTS:
+            raise ValueError(f"unknown product {key!r}; choose from {sorted(EMIT_PRODUCTS)}")
+        short, version, prefixes = EMIT_PRODUCTS[key]
+        found = earthaccess.search_data(
+            short_name=short, version=version, temporal=_scene_window(scene_id)
+        )
+        if key.endswith("plm"):
+            found = [g for g in found if scene_id in _source_scenes(g)]
+        else:
+            found = [g for g in found if scene_id in g["umm"]["GranuleUR"]]
+        if not found:
+            raise LookupError(f"{scene_id}: no {short} v{version} granule")
+        for g in found:
+            for u in g.data_links():
+                name = u.rsplit("/", 1)[-1]
+                if name.startswith(prefixes) and name.endswith((".nc", ".tif", ".json")):
+                    urls.append(u)
+    return urls
+
+
+def download_emit_scenes(
+    scenes: list[dict], out_dir: Path, products: list[str] | None = None
+) -> list[str]:
+    """Download the listed products for each scene into out_dir/<scene id>/.
+
+    `scenes` are entries from configs/gas_scenes.yaml; `products` overrides each entry's
+    own list. Files already on disk are skipped by earthaccess.
+    """
+    import earthaccess
+
+    earthaccess.login(strategy="netrc")
+    paths = []
+    for s in scenes:
+        urls = emit_scene_urls(s["id"], products or s["products"])
+        dest = out_dir / s["id"]
+        dest.mkdir(parents=True, exist_ok=True)
+        paths += earthaccess.download(urls, str(dest))
+    return paths

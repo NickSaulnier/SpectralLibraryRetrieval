@@ -64,11 +64,15 @@ class Workspace:
         return sorted(p.parent.name for p in (self.root / "data/resampled").glob("*/library.npz"))
 
     def scenes(self) -> dict[str, SceneInfo]:
+        """Reflectance scenes for mineral mapping. HyTES thermal radiance under
+        data/scenes/hytes is also ENVI, but belongs to the gas pipeline, so it is skipped."""
+        root = self.root / "data/scenes"
         out = {}
-        for p in sorted((self.root / "data/scenes").rglob("EMIT_L2A_RFL_*.nc")):
+        for p in sorted(root.rglob("EMIT_L2A_RFL_*.nc")):
             out[p.stem] = SceneInfo(p.stem, p, "emit")
-        for p in sorted((self.root / "data/scenes").rglob("*.hdr")):
-            out[p.stem] = SceneInfo(p.stem, p, "aviris")
+        for p in sorted(root.rglob("*.hdr")):
+            if "hytes" not in p.relative_to(root).parts:
+                out[p.stem] = SceneInfo(p.stem, p, "aviris")
         return out
 
     def map_dir(self, scene_id: str) -> Path:

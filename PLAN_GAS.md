@@ -165,6 +165,18 @@ Effort assumes part-time work, as in PLAN.md. G1–G3 give a usable VSWIR methan
 
 ### Phase G0: Data and references (1 week)
 
+**Status (2026-10-31):** mostly done; details in `data/raw/MANIFEST.md`.
+- **EMIT:** seven scenes in `configs/gas_scenes.yaml`, fetched with `specret download emit-gas`: three CH4 plume scenes, two CO2 plume scenes, and Mountain Pass and Cuprite as no-plume scenes. All use L1B/L2A v001 and GHG v002.
+- **HyTES:** Salton Sea, Kern River and Chino flights, fetched with `scripts/download_g0_hytes.py`. ORNL DAAC accepts the Earthdata login.
+- **HITRAN:** line lists for 10 gases, fetched with `specret download hitran`.
+- **Wind:** HRRR works with no account. The keyless ERA5 cross-check is not verified yet.
+
+Still open:
+- MERRA-2 needs the GES DISC app approved in the Earthdata profile.
+- Whether to buy the PNNL library is undecided (free fallback: HITRAN cross-sections).
+- No public per-release table with EMIT overpasses has been found yet.
+- AVIRIS-NG radiance is deferred to G5 (open question 2).
+
 - **EMIT:** download L1B RAD and OBS for 6–10 scenes with plumes in the EMIT L2B CH4PLM/CO2PLM catalogue, together with their L2B CH4ENH/CO2ENH and L2A RFL. Cover a spread of surfaces:
   - Permian Basin (oil and gas, bright soil);
   - Turkmenistan (super-emitters, desert);

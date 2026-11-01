@@ -1,0 +1,78 @@
+# Gas registry for plume work (PLAN_GAS.md). One entry per gas:
+#   hitran_id   HITRAN molecule number (line lists via HAPI); null = cross-sections only (PNNL)
+#   molar_mass  g/mol, for converting ppm·m to kg
+#   vswir/lwir  diagnostic windows in nm; an empty list means the gas is not used in that range
+#   quantify    which ranges report a column and emission rate; elsewhere the gas is flag-only
+#               (the tool may say "absorption consistent with X", never a number)
+# Spectral ranges fetched from HITRAN are in `hitran_ranges_cm1` at the bottom.
+
+gases:
+  CH4:
+    hitran_id: 6
+    molar_mass: 16.04
+    vswir: [[2200, 2400], [1630, 1700]]
+    lwir: [[7400, 8300]]
+    quantify: [vswir, lwir]
+  CO2:
+    hitran_id: 2
+    molar_mass: 44.01
+    vswir: [[1990, 2090], [1560, 1620]]
+    lwir: []  # 15 µm band is outside HyTES; weak 9.4/10.4 µm bands are not usable
+    quantify: [vswir]
+  H2O:
+    # Always fitted as a background term, never reported as a plume gas.
+    hitran_id: 1
+    molar_mass: 18.02
+    vswir: [[1800, 1950]]
+    lwir: [[7500, 12000]]
+    quantify: []
+  N2O:
+    hitran_id: 4
+    molar_mass: 44.01
+    vswir: [[2240, 2300]]
+    lwir: [[7700, 8000]]
+    quantify: [lwir]
+  NH3:
+    hitran_id: 11
+    molar_mass: 17.03
+    vswir: [[1500, 1560], [1980, 2050]]
+    lwir: [[9500, 11500]]
+    quantify: [lwir]
+  SO2:
+    hitran_id: 9
+    molar_mass: 64.07
+    vswir: []
+    lwir: [[8300, 9000]]
+    quantify: [lwir]
+  H2S:
+    hitran_id: 31
+    molar_mass: 34.08
+    vswir: [[1570, 1600]]
+    lwir: []
+    quantify: []
+  CO:
+    hitran_id: 5
+    molar_mass: 28.01
+    vswir: [[2300, 2400]]
+    lwir: []
+    quantify: []
+  C2H6:
+    # HITRAN has C2H6 lines only in the LWIR range here; its 1.68/2.3 µm features need the
+    # HITRAN cross-section files, which are not fetched yet.
+    hitran_id: 27
+    molar_mass: 30.07
+    vswir: [[1680, 1700], [2300, 2450]]
+    lwir: [[11900, 12300]]
+    quantify: []
+  O3:
+    # LWIR atmospheric background term (9.6 µm band).
+    hitran_id: 3
+    molar_mass: 48.00
+    vswir: []
+    lwir: [[9400, 10100]]
+    quantify: []
+
+# Wavenumber ranges fetched from HITRAN (cm^-1), with a margin around each sensor range.
+hitran_ranges_cm1:
+  vswir: [3950, 6700]   # 1.49-2.53 µm
+  lwir: [750, 1400]     # 7.1-13.3 µm
