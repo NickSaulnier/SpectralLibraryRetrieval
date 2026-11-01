@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spectral Match Viewer</title>
-<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script src="/static/plotly.min.js"></script>
 <style>
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1f22; --muted: #646a73; --line: #e2e0db;
@@ -21,11 +21,16 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+  header { display: flex; align-items: center; gap: 12px 16px; padding: 12px 20px;
            border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  header select { font: inherit; padding: 4px 8px; border: 1px solid var(--line);
-                  border-radius: 6px; background: var(--bg); color: var(--ink); max-width: 100%; }
+  select, input, button { font: inherit; padding: 4px 8px; border: 1px solid var(--line);
+                          border-radius: 6px; background: var(--bg); color: var(--ink); max-width: 100%; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  #goto { display: flex; gap: 6px; }
+  #goto input { width: 190px; }
   .hint { color: var(--muted); font-size: 13px; }
   main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.15fr);
          gap: 16px; padding: 16px 20px; }
@@ -34,12 +39,17 @@
            padding: 14px; min-width: 0; }
   .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
               color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   #mapwrap { position: relative; overflow: auto; max-height: 70vh; border-radius: 6px;
              background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0/16px 16px; }
   #map { display: block; width: 100%; height: auto; cursor: crosshair; image-rendering: pixelated; }
   #marker { position: absolute; width: 14px; height: 14px; border: 2px solid #fff;
             box-shadow: 0 0 0 2px #000; border-radius: 50%; transform: translate(-50%, -50%);
             pointer-events: none; display: none; }
+  #unmapped { display: none; padding: 28px 16px; text-align: center; border: 1.5px dashed var(--line);
+              border-radius: 8px; }
+  #unmapped p { margin: 0 0 12px; }
+  progress { width: 100%; max-width: 320px; height: 8px; accent-color: var(--accent); }
   #legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; }
   #legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
   #legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -57,6 +67,8 @@
           text-align: center; color: var(--muted); }
   #drop.over { border-color: var(--accent); color: var(--accent); }
   #status { color: var(--muted); font-size: 13px; min-height: 1.4em; }
+  #export { display: flex; gap: 6px; }
+  #export button { font-size: 12px; padding: 2px 8px; }
   .swatch { display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; }
 </style>
 </head>
@@ -64,17 +76,28 @@
 <header>
   <h1>Spectral Match Viewer</h1>
   <select id="scene" aria-label="Scene"></select>
-  <span class="hint">Click a pixel on the map, or drop a field spectrum below.</span>
+  <form id="goto">
+    <input id="latlon" placeholder="lat, lon  e.g. 37.53, -117.22" aria-label="Latitude and longitude">
+    <button type="submit">Go</button>
+  </form>
+  <span class="hint">Click a pixel on the map, enter a location, or drop a field spectrum below.</span>
 </header>
 <main>
   <section class="panel">
     <h2>Best-match mineral group</h2>
     <div id="mapwrap"><img id="map" alt="Mineral group map"><div id="marker"></div></div>
+    <div id="unmapped">
+      <p id="unmapped-msg">This scene is not mapped yet.</p>
+      <button id="mapbtn" class="primary">Map this scene</button>
+      <div id="job" hidden><progress id="jobbar" max="1" value="0"></progress>
+        <div class="hint" id="jobtext"></div></div>
+    </div>
     <div id="legend"></div>
     <div id="drop">Drop an .asd or .csv field spectrum here, or <label style="text-decoration:underline;cursor:pointer">choose a file<input id="file" type="file" accept=".asd,.csv,.txt,.tsv" hidden></label></div>
   </section>
   <section class="panel">
-    <h2>Spectrum and matches</h2>
+    <div class="panel-head"><h2>Spectrum and matches</h2>
+      <div id="export"><button id="csv-matches" disabled>Matches CSV</button><button id="csv-spectra" disabled>Spectra CSV</button></div></div>
     <div id="status">No pixel selected.</div>
     <div id="verdict"></div>
     <div id="plot"></div>
@@ -84,43 +107,115 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-let scene = null;
+let scenes = [], scene = null, last = null, polling = null;
 
-async function loadScenes() {
-  const scenes = (await (await fetch('/api/scenes')).json()).filter(s => s.mapped);
-  if (!scenes.length) { $('status').textContent = 'No mapped scenes. Run `specret map-scene` first.'; return; }
-  $('scene').innerHTML = scenes.map(s => `<option>${s.scene_id}</option>`).join('');
-  $('scene').onchange = () => showScene($('scene').value);
-  showScene(scenes[0].scene_id);
+async function errorText(res) {
+  try { return (await res.json()).detail; } catch { return `${res.status} ${res.statusText}`; }
 }
+
+async function loadScenes(select) {
+  scenes = await (await fetch('/api/scenes')).json();
+  if (!scenes.length) {
+    $('scene').hidden = true;
+    $('status').textContent = 'No scenes in data/scenes. Drop a field spectrum below, or download a scene first.';
+    $('mapwrap').hidden = true;
+    return;
+  }
+  $('scene').innerHTML = scenes.map(s =>
+    `<option value="${s.scene_id}">${s.scene_id}${s.mapped ? '' : ' (not mapped)'}</option>`).join('');
+  const pick = select || (scenes.find(s => s.mapped) || scenes[0]).scene_id;
+  $('scene').value = pick;
+  showScene(pick);
+}
+$('scene').onchange = () => showScene($('scene').value);
 
 async function showScene(id) {
   scene = id;
+  clearInterval(polling);
   $('marker').style.display = 'none';
+  const info = scenes.find(s => s.scene_id === id);
+  $('mapwrap').hidden = !info.mapped;
+  $('unmapped').style.display = info.mapped ? 'none' : 'block';
+  $('legend').innerHTML = '';
+  if (!info.mapped) {
+    $('unmapped-msg').textContent = `This ${info.kind.toUpperCase()} scene is not mapped yet. Mapping takes about 2 minutes for EMIT. You can still look up a location.`;
+    $('mapbtn').hidden = !!info.job; $('job').hidden = !info.job;
+    if (info.job) watchJob(info.job);
+    return;
+  }
   $('map').src = `/api/map/${id}.png`;
   const legend = await (await fetch(`/api/legend/${id}`)).json();
   $('legend').innerHTML = legend.filter(l => l.fraction >= 0.002).map(l =>
     `<span><i style="background:rgb(${l.rgb})"></i>${l.group.replaceAll('_', ' ')} ${(100 * l.fraction).toFixed(1)}%</span>`).join('');
 }
 
-$('map').addEventListener('click', async (ev) => {
-  const img = $('map'), r = img.getBoundingClientRect();
-  const x = Math.floor((ev.clientX - r.left) * img.naturalWidth / r.width);
-  const y = Math.floor((ev.clientY - r.top) * img.naturalHeight / r.height);
-  const m = $('marker');
-  m.style.left = `${ev.clientX - r.left + $('mapwrap').scrollLeft}px`;
-  m.style.top = `${ev.clientY - r.top + $('mapwrap').scrollTop}px`;
+$('mapbtn').onclick = async () => {
+  const res = await fetch(`/api/map/${scene}`, { method: 'POST' });
+  if (!res.ok) { $('jobtext').textContent = await errorText(res); $('job').hidden = false; return; }
+  $('mapbtn').hidden = true; $('job').hidden = false;
+  watchJob((await res.json()).job_id);
+};
+
+function watchJob(jobId) {
+  const id = scene;
+  const tick = async () => {
+    const res = await fetch(`/api/jobs/${jobId}`);
+    if (!res.ok) { clearInterval(polling); $('jobtext').textContent = await errorText(res); return; }
+    const j = await res.json();
+    $('jobbar').value = j.progress;
+    $('jobtext').textContent = `Mapping… ${Math.round(100 * j.progress)}% · ${j.elapsed_s} s`;
+    if (j.state === 'done') { clearInterval(polling); if (scene === id) loadScenes(id); }
+    if (j.state === 'failed') {
+      clearInterval(polling);
+      $('jobtext').textContent = `Mapping failed: ${j.error}`;
+      $('mapbtn').hidden = false; $('mapbtn').textContent = 'Try again';
+    }
+  };
+  clearInterval(polling);
+  polling = setInterval(tick, 1500);
+  tick();
+}
+
+function placeMarker(x, y) {
+  const img = $('map'), m = $('marker');
+  if ($('mapwrap').hidden || !img.naturalWidth) { m.style.display = 'none'; return; }
+  m.style.left = `${img.offsetLeft + (x + 0.5) * img.clientWidth / img.naturalWidth}px`;
+  m.style.top = `${img.offsetTop + (y + 0.5) * img.clientHeight / img.naturalHeight}px`;
   m.style.display = 'block';
+}
+
+async function identify(query) {
   $('status').textContent = 'Identifying…';
-  const res = await fetch(`/api/pixel/${scene}?x=${x}&y=${y}`);
-  if (!res.ok) { $('status').textContent = (await res.json()).detail; return; }
+  const res = await fetch(`/api/pixel/${scene}?${new URLSearchParams(query)}`);
+  if (!res.ok) { $('status').textContent = await errorText(res); return; }
   const d = await res.json();
+  placeMarker(d.pixel.x, d.pixel.y);
   const where = d.pixel.lat == null ? '' : ` · ${d.pixel.lat.toFixed(4)}°, ${d.pixel.lon.toFixed(4)}°`;
   $('status').textContent = `Pixel row ${d.pixel.row}, col ${d.pixel.col}${where}`;
-  render(d);
+  render(d, `${scene}_r${d.pixel.row}_c${d.pixel.col}`);
+  return d;
+}
+
+$('map').addEventListener('click', (ev) => {
+  const img = $('map'), r = img.getBoundingClientRect();
+  identify({
+    x: Math.floor((ev.clientX - r.left) * img.naturalWidth / r.width),
+    y: Math.floor((ev.clientY - r.top) * img.naturalHeight / r.height),
+  });
 });
 
-function render(d) {
+$('goto').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const nums = $('latlon').value.match(/-?\d+(\.\d+)?/g);
+  if (!scene) { $('status').textContent = 'No scene to look in.'; return; }
+  if (!nums || nums.length !== 2) { $('status').textContent = 'Enter a location as "lat, lon", e.g. 37.53, -117.22'; return; }
+  const d = await identify({ lat: nums[0], lon: nums[1] });
+  if (d) $('marker').scrollIntoView({ block: 'nearest', inline: 'nearest' });
+});
+
+function render(d, name) {
+  last = { ...d, name };
+  $('csv-matches').disabled = $('csv-spectra').disabled = false;
   const s = d.summary;
   const tier = { 'confident': 'high', 'uncertain': 'medium', 'likely unknown': 'low' }[s.confidence] || 'medium';
   const pText = s.p_group_correct == null ? '' : `P(group right) ${s.p_group_correct.toFixed(2)}`;
@@ -146,8 +241,8 @@ function render(d) {
   Plotly.newPlot('plot', traces, {
     margin: { l: 44, r: 10, t: 48, b: 40 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
     font: { color: css('--ink'), size: 12 }, shapes, annotations,
-    xaxis: { title: 'Wavelength (nm)', gridcolor: css('--line'), zeroline: false },
-    yaxis: { title: 'Scaled reflectance', gridcolor: css('--line'), zeroline: false },
+    xaxis: { title: { text: 'Wavelength (nm)' }, gridcolor: css('--line'), zeroline: false },
+    yaxis: { title: { text: 'Scaled reflectance' }, gridcolor: css('--line'), zeroline: false },
     legend: { orientation: 'h', y: -0.25 },
   }, { displayModeBar: false, responsive: true });
   const ev = (f) => `${f.window.replaceAll('_', '-')}: ${f.query_center_nm.toFixed(0)}→${f.cand_center_nm.toFixed(0)} nm, r ${f.shape_r.toFixed(2)}`;
@@ -157,14 +252,42 @@ function render(d) {
       <td>${(m.group || '').replaceAll('_', ' ')}</td><td class="num">${m.score.toFixed(2)}</td><td>${m.purity_flag ?? '–'}</td></tr>`).join('');
 }
 
+// --- CSV export of the current result ---
+const cell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s; };
+const toCsv = (rows) => rows.map(r => r.map(cell).join(',')).join('\n') + '\n';
+function download(filename, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  a.download = filename.replace(/[^\w.-]+/g, '_');
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+$('csv-matches').onclick = () => {
+  const d = last, s = d.summary, px = d.pixel || {};
+  const rows = [['source', 'row', 'col', 'lat', 'lon', 'verdict', 'p_group_correct', 'rank', 'spectrum_id',
+                 'material_name', 'group', 'score', 'purity', 'evidence']];
+  d.matches.forEach((m, i) => rows.push([d.name, px.row, px.col, px.lat, px.lon, s.verdict, s.p_group_correct,
+    i + 1, m.spectrum_id, m.material_name, m.group, m.score.toFixed(4), m.purity_flag,
+    (m.features || []).map(f => `${f.window} ${f.query_center_nm.toFixed(0)}->${f.cand_center_nm.toFixed(0)} nm r ${f.shape_r.toFixed(2)}`).join('; ')]));
+  download(`${d.name}_matches.csv`, toCsv(rows));
+};
+$('csv-spectra').onclick = () => {
+  const d = last, top = d.matches.slice(0, 3);
+  const rows = [['wavelength_nm', 'query', ...top.map(m => `${m.material_name} (${m.spectrum_id})`)]];
+  d.wavelengths_nm.forEach((w, i) => rows.push([w, d.query[i], ...top.map(m => m.spectrum[i])]));
+  download(`${d.name}_spectra.csv`, toCsv(rows));
+};
+
+// --- field spectra ---
 async function uploadFile(file) {
   $('status').textContent = `Identifying ${file.name}…`;
   const body = new FormData(); body.append('file', file);
   const res = await fetch('/api/field', { method: 'POST', body });
-  if (!res.ok) { $('status').textContent = (await res.json()).detail; return; }
+  if (!res.ok) { $('status').textContent = await errorText(res); return; }
   const results = await res.json();
+  $('marker').style.display = 'none';
   $('status').textContent = `Field spectrum: ${results[0].name}${results.length > 1 ? ` (+${results.length - 1} more in file)` : ''}`;
-  render(results[0]);
+  render(results[0], results[0].name || file.name);
 }
 const drop = $('drop');
 drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });

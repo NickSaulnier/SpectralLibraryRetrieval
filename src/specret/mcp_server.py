@@ -7,14 +7,11 @@ guessing. Every answer names library spectra and the absorption features that su
 
 from __future__ import annotations
 
-import threading
-import time
-import traceback
-import uuid
 from pathlib import Path
 
 from fastmcp import FastMCP
 
+from specret.scene import jobs
 from specret.workspace import Workspace, jsonable
 
 INSTRUCTIONS = """\
@@ -27,8 +24,6 @@ mineral group is right, and a tier: confident (>= 0.5), uncertain (0.3-0.5) or
 mixtures: use `unmix_pixel` to split one into library endmembers with fractions.
 Mineral groups follow configs/taxonomy.yaml.
 """
-
-JOBS: dict[str, dict] = {}
 
 
 def build_server(ws: Workspace | None = None) -> FastMCP:
@@ -166,42 +161,12 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
 
         Returns a job id; poll `job_status`. Results feed `scene_summary`.
         """
-        if scene_id not in ws.scenes():
-            raise ValueError(f"unknown scene '{scene_id}'")
-        job_id = uuid.uuid4().hex[:8]
-        JOBS[job_id] = {"scene_id": scene_id, "state": "running", "started": time.time()}
-
-        def work() -> None:
-            from specret.scene.mapper import map_scene as run_map
-            from specret.scene.outputs import write_scene_maps
-
-            try:
-                scene = ws.scene(scene_id)
-                r = ws.retriever(ws.sensor_for_scene(scene))
-                model = ws.confidence_model(ws.sensor_for_scene(scene))
-                smap = run_map(scene, r, ws.canonical, progress=False, confidence=model)
-                out = ws.map_dir(scene_id)
-                smap.save(out / "scene_map.npz")
-                paths = write_scene_maps(smap, scene, ws.canonical, out)
-                JOBS[job_id].update(
-                    state="done",
-                    seconds=round(smap.seconds),
-                    outputs={k: str(v) for k, v in paths.items()},
-                )
-            except Exception as exc:  # reported to the agent through job_status
-                JOBS[job_id].update(state="failed", error=f"{exc}\n{traceback.format_exc()}")
-
-        threading.Thread(target=work, daemon=True).start()
-        return {"job_id": job_id, "state": "running"}
+        return {"job_id": jobs.start_map_job(ws, scene_id), "state": "running"}
 
     @mcp.tool
     def job_status(job_id: str) -> dict:
-        """State of a background mapping job."""
-        if job_id not in JOBS:
-            raise ValueError(f"unknown job '{job_id}'")
-        job = dict(JOBS[job_id])
-        job["elapsed_s"] = round(time.time() - job.pop("started"))
-        return job
+        """State of a background mapping job, with `progress` from 0 to 1."""
+        return jobs.job_status(job_id)
 
     @mcp.tool
     def scene_summary(

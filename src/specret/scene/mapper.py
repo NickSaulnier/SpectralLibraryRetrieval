@@ -11,6 +11,7 @@ and the viewer and MCP tools read the swath arrays directly for per-pixel lookup
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,11 +101,13 @@ def map_scene(
     block_rows: int = 64,
     progress: bool = True,
     confidence=None,
+    on_progress: Callable[[float], None] | None = None,
 ) -> SceneMap:
     """Rank every pixel of `scene` (EmitScene or AvirisScene) against the library.
 
     With a `confidence` model (openset.calibrate.ConfidenceModel) each pixel also gets a
-    calibrated P(top-1 group is right).
+    calibrated P(top-1 group is right). `on_progress` is called with the fraction of rows
+    done after each block.
     """
     retriever.check_bands(np.asarray(scene.centers_nm))
     lib_ids = retriever.lib.spectrum_ids
@@ -118,6 +121,8 @@ def map_scene(
     t0 = time.perf_counter()
     starts = range(0, n_rows, block_rows)
     for r0 in tqdm(starts, desc="mapping", unit="block", disable=not progress):
+        if on_progress is not None:
+            on_progress(r0 / n_rows)
         r1 = min(r0 + block_rows, n_rows)
         block = scene.block(slice(r0, r1), slice(0, n_cols)).reshape(-1, len(scene.centers_nm))
         has_data = np.isfinite(block).any(axis=1)
@@ -146,6 +151,8 @@ def map_scene(
             flat_p = np.full(block.shape[0], np.nan, dtype=np.float32)
             flat_p[has_data] = confidence.predict(feats)
             p_correct[r0:r1] = flat_p.reshape(r1 - r0, n_cols)
+    if on_progress is not None:
+        on_progress(1.0)
 
     return SceneMap(
         str(getattr(scene, "path", getattr(scene, "hdr_path", ""))),

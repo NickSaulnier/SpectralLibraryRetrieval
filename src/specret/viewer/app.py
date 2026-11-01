@@ -1,8 +1,9 @@
 """Local web viewer: click a pixel on a mineral map, or drop in a field spectrum.
 
-Run with `uv run specret view` and open http://127.0.0.1:8765. The page shows the mapped
-scene; clicking a pixel plots its spectrum against the top matches, shades the diagnostic
-feature windows, and lists the feature evidence for each match.
+Run with `uv run specret view` and open http://127.0.0.1:8765. The page lists every scene
+and can map an unmapped one in the background. Clicking a pixel (or entering a lat/lon)
+plots its spectrum against the top matches, shades the diagnostic feature windows, and
+lists the feature evidence for each match. Everything, Plotly included, is served locally.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
 
+from specret.scene import jobs
 from specret.scene.mapper import SceneMap
 from specret.scene.outputs import group_codes, group_colors
 from specret.workspace import UNKNOWN_BELOW, Workspace, jsonable
@@ -72,6 +74,14 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
     def index() -> str:
         return (STATIC / "index.html").read_text(encoding="utf-8")
 
+    @app.get("/static/plotly.min.js")
+    def plotly_js() -> Response:
+        return Response(
+            _plotly_js(),
+            media_type="application/javascript",
+            headers={"Cache-Control": "max-age=86400"},
+        )
+
     @app.get("/api/scenes")
     def scenes() -> list[dict]:
         return [
@@ -79,9 +89,30 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
                 "scene_id": sid,
                 "kind": info.kind,
                 "mapped": (ws.map_dir(sid) / "scene_map.npz").exists(),
+                "job": jobs.running_job(sid),
             }
             for sid, info in ws.scenes().items()
         ]
+
+    @app.post("/api/map/{scene_id}")
+    def start_mapping(scene_id: str) -> dict:
+        try:
+            return {"job_id": jobs.start_map_job(ws, scene_id)}
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+    @app.get("/api/jobs/{job_id}")
+    def job(job_id: str) -> dict:
+        try:
+            status = jobs.job_status(job_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+        if status["state"] == "done":
+            scene_map.cache_clear()
+            ortho_layers.cache_clear()
+        if status.get("error"):
+            status["error"] = status["error"].splitlines()[0]
+        return status
 
     @app.get("/api/map/{scene_id}.png")
     def map_png(scene_id: str) -> Response:
@@ -122,9 +153,22 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         return jsonable(sorted(rows, key=lambda r: -r["fraction"]))
 
     @app.get("/api/pixel/{scene_id}")
-    def pixel(scene_id: str, x: int, y: int) -> dict:
-        """Identify the pixel under ortho-image coordinates (x, y)."""
-        scene = ws.scene(scene_id)
+    def pixel(
+        scene_id: str,
+        x: int | None = None,
+        y: int | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+    ) -> dict:
+        """Identify the pixel at ortho-image coordinates (x, y), or nearest to (lat, lon)."""
+        try:
+            scene = ws.scene(scene_id)
+            if lat is not None and lon is not None:
+                x, y = _ortho_xy(ws, scene, lat, lon)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        if x is None or y is None:
+            raise HTTPException(400, "give x and y, or lat and lon")
         if hasattr(scene, "glt_y"):  # EMIT: map grid -> swath through the lookup table
             if not (0 <= y < scene.glt_y.shape[0] and 0 <= x < scene.glt_x.shape[1]):
                 raise HTTPException(400, "outside the image")
@@ -140,7 +184,7 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         if not np.isfinite(spectrum).any():
             raise HTTPException(404, "no data at this location")
         result = ws.identify(spectrum, sensor, k=5, unmix=True)
-        result["pixel"] = ws.pixel_info(scene, row, col)
+        result["pixel"] = {**ws.pixel_info(scene, row, col), "x": x, "y": y}
         return spectrum_payload(sensor, spectrum, result)
 
     @app.post("/api/field")
@@ -167,6 +211,22 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         return out
 
     return app
+
+
+@lru_cache(maxsize=1)
+def _plotly_js() -> str:
+    from plotly.offline import get_plotlyjs
+
+    return get_plotlyjs()
+
+
+def _ortho_xy(ws: Workspace, scene, lat: float, lon: float) -> tuple[int, int]:
+    """Ortho-image (x, y) of a location: EMIT's north-up lat/lon grid, or AVIRIS's own grid."""
+    if hasattr(scene, "glt_y"):
+        x0, dx, _, y0, _, dy = scene.geotransform
+        return int(np.floor((lon - x0) / dx)), int(np.floor((lat - y0) / dy))
+    row, col = ws.locate(scene, lat=lat, lon=lon)
+    return col, row
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:

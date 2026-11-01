@@ -302,7 +302,7 @@ def test_aviris_map_viewer_and_identify(workspace_root, monkeypatch, capsys):
 
     client = TestClient(create_app(Workspace(root=workspace_root, chapters=None)))
     assert client.get("/api/scenes").json() == [
-        {"scene_id": "f_test_img", "kind": "aviris", "mapped": True}
+        {"scene_id": "f_test_img", "kind": "aviris", "mapped": True, "job": None}
     ]
     assert client.get("/api/map/f_test_img.png").status_code == 200
     body = client.get("/api/pixel/f_test_img", params={"x": 2, "y": 0}).json()
@@ -314,3 +314,57 @@ def test_aviris_map_viewer_and_identify(workspace_root, monkeypatch, capsys):
     lat, lon = body["pixel"]["lat"], body["pixel"]["lon"]
     main(["identify", "f_test_img", "--lat", str(lat), "--lon", str(lon), "--chapters", "all"])
     assert "pixel row 0, col 2" in capsys.readouterr().out
+
+
+def test_viewer_maps_scene_in_background(workspace_root):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from specret.viewer.app import create_app
+    from specret.workspace import Workspace
+
+    write_aviris(workspace_root / "data/scenes/aviris/f_job_img.hdr")
+    client = TestClient(create_app(Workspace(root=workspace_root, chapters=None)))
+    assert "plotly" in client.get("/static/plotly.min.js").text[:500].lower()
+    assert client.get("/api/scenes").json()[0]["mapped"] is False
+    assert client.get("/api/map/f_job_img.png").status_code == 404
+
+    job_id = client.post("/api/map/f_job_img").json()["job_id"]
+    for _ in range(300):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["state"] != "running":
+            break
+        time.sleep(0.1)
+    assert job["state"] == "done" and job["progress"] == 1.0
+    assert client.get("/api/scenes").json()[0]["mapped"] is True
+    assert client.get("/api/map/f_job_img.png").status_code == 200
+
+    px = client.get("/api/pixel/f_job_img", params={"x": 2, "y": 1}).json()["pixel"]
+    again = client.get("/api/pixel/f_job_img", params={"lat": px["lat"], "lon": px["lon"]})
+    assert again.json()["pixel"] == px  # lat/lon lands back on the same pixel
+    assert client.get("/api/pixel/f_job_img", params={"lat": 0, "lon": 0}).status_code == 400
+    assert client.post("/api/map/nope").status_code == 404
+    assert client.get("/api/jobs/nope").status_code == 404
+
+
+def test_viewer_pixel_by_lat_lon_on_emit_grid(workspace_root, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import specret.workspace
+    from specret.viewer.app import create_app
+    from specret.workspace import Workspace
+
+    scene_file = workspace_root / "data/scenes/emit/EMIT_L2A_RFL_fake.nc"
+    scene_file.parent.mkdir(parents=True)
+    scene_file.touch()
+    monkeypatch.setattr(specret.workspace, "open_scene", lambda path: FakeScene())
+    client = TestClient(create_app(Workspace(root=workspace_root, chapters=None)))
+
+    # FakeScene's grid starts at (37.6, -117.3) with 0.001 degree cells and an identity GLT.
+    body = client.get(
+        "/api/pixel/EMIT_L2A_RFL_fake", params={"lat": 37.5995, "lon": -117.2975}
+    ).json()
+    assert (body["pixel"]["x"], body["pixel"]["y"]) == (2, 0)
+    assert body["summary"]["best_group"] == "calcite"  # (0 + 2) % 4 -> Calcite
+    assert client.get("/api/pixel/EMIT_L2A_RFL_fake").status_code == 400
