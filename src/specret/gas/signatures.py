@@ -68,8 +68,10 @@ def vertical_optical_depth(lbl: LineByLine, cond: Conditions) -> np.ndarray:
             # The scene's water column is what lies above the surface; spread it over the layers.
             shape = atm.h2o_shape * frac
             col = cond.h2o_gcm2 * H2O_MOLECULES_PER_G * shape / shape.sum()
-        else:
+        elif gas in VMR:
             col = VMR[gas] * atm.air_column * frac
+        else:
+            continue
         tau += col.astype(np.float64) @ sigma
     return tau
 

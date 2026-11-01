@@ -21,3 +21,38 @@ library:
   wing_cm1: 25.0
   margin_nm: 30.0      # computed beyond each window, so band responses near its edges are complete
   background_gases: [H2O, CO2, CH4]
+  # Gases fitted in plumes but absent from the background model. HITRAN has no VSWIR lines for
+  # C2H6 (cross-sections only), so it is not here yet.
+  plume_gases: [N2O, CO, NH3, H2S]
+
+# Surface materials that can mimic gas absorption (gas/confusers.py). Each class is a regular
+# expression on library material names; its signature is the mean continuum-removed log
+# reflectance of those spectra.
+confusers:
+  classes:
+    calcite: "Calcite|Calcite_REE-bearing"
+    dolomite: "Dolomite"
+    other_carbonate: 'Magnesite\+Hydromag|Siderite'
+    hydrocarbon: "Asphalt.*|Kerogen.*|Oil(75|92)_Water.*|Oil_BlackPoolonBeach|Tar_Paper"
+    plastic: "Plastic.*|Polystyrene|Nylon_.*|Polyester_.*"
+  # L2B MIN ~2 µm mineral groups that flag a candidate (taxonomy groups)
+  mineral_groups: [calcite, dolomite, other_carbonate]
+  mineral_flag_fraction: 0.3  # flag when at least this share of a candidate's pixels is one
+
+# Candidate plumes (gas/plumes.py): hysteresis on the 1-px-smoothed z map of each column
+candidates:
+  z_high: 5.0
+  z_low: 2.5
+  min_px: 5
+
+# Gas identification (gas/identify.py)
+identify:
+  fit_windows: [[1500, 1790], [1950, 2450]]
+  gases: [CH4, CO2, H2O, N2O, CO, NH3, H2S]
+  named_gases: [CH4, CO2]  # only these can be the identified gas (gases.yaml quantify: vswir)
+  flag_penalty: 3.0        # flag-only gases need this many times the BIC penalty to enter
+  max_terms: 3
+  null_samples: 300     # shifted copies of a candidate's mask, for its background covariance
+  # A candidate is reported as a plume of its named gas at or above this calibrated confidence.
+  # Chosen for about 1 false plume per 1000 km² on the no-plume scenes (results/gas_g2_identification.md).
+  confidence_threshold: 0.2

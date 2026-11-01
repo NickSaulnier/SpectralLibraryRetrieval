@@ -35,7 +35,9 @@ PA_PER_ATM = 101325.0
 # Layer edges (km). Thin near the ground, where the plume and most of the water vapour are.
 LAYER_EDGES_KM = np.array([0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30, 50.0])
 H2O_SCALE_HEIGHT_KM = 2.0
-VMR = {"CH4": 1.9e-6, "CO2": 420e-6}  # well-mixed background; H2O is set per scene
+# Well-mixed background; H2O is set per scene. NH3 and H2S are only plume gases (their
+# background is negligible), so they appear in no background column.
+VMR = {"CH4": 1.9e-6, "CO2": 420e-6, "N2O": 0.33e-6, "CO": 0.1e-6}
 # Lines weaker than this (cm^-1/(molecule cm^-2) at 296 K) are dropped. 1e-27 keeps every line
 # that matters for a water column of a few g/cm^2.
 SW_MIN = 1e-27
@@ -203,20 +205,27 @@ def build_window(
     hitran_dir: Path = HITRAN_DIR,
     force: bool = False,
 ) -> LineByLine:
-    """Cross-sections for a window (nm), computed once and cached."""
+    """Cross-sections for a window (nm), computed once and cached.
+
+    By default the window holds the background gases and the plume gases of plumes.yaml.
+    Gases missing from an existing cache are computed and added to it.
+    """
     path = window_path(lo_nm, hi_nm, cache_dir)
-    if path.exists() and not force:
-        return LineByLine.load(path)
     cfg = plume_config()["library"]
-    gases = gases or cfg["background_gases"]
+    gases = gases or [*cfg["background_gases"], *cfg["plume_gases"]]
+    cached = LineByLine.load(path) if path.exists() and not force else None
+    if cached is not None and set(gases) <= set(cached.sigma):
+        return cached
     known = load_gases()["gases"]
     atm = standard_atmosphere()
     cov_lo, cov_hi = load_gases()["hitran_ranges_cm1"]["vswir"]
     nu_lo = max(1e7 / (hi_nm + cfg["margin_nm"]), cov_lo)
     nu_hi = min(1e7 / (lo_nm - cfg["margin_nm"]), cov_hi)
-    sigma = {}
-    nu = None
+    sigma = dict(cached.sigma) if cached is not None else {}
+    nu = cached.nu_cm1 if cached is not None else None
     for g in gases:
+        if g in sigma:
+            continue
         if g not in known:
             raise ValueError(f"unknown gas {g}; see configs/gases.yaml")
         print(f"line-by-line {g}: {nu_lo:.0f}-{nu_hi:.0f} cm-1, {atm.n_layers} layers")

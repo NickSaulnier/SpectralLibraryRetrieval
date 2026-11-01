@@ -33,6 +33,7 @@ class MatchedFilterResult:
     excluded: np.ndarray  # (rows, cols) pixels left out of the final background statistics
     n_valid: np.ndarray  # (cols,) pixels used for the final statistics
     shrinkage: np.ndarray  # (cols,) covariance shrinkage used per column
+    mu: np.ndarray  # (cols, bands) background mean radiance per column, final pass
 
 
 def loo_shrinkage(d, n, alphas=LOO_ALPHAS):
@@ -92,7 +93,7 @@ def _filter_chunk(x, keep, finite, kk, shrinkage, min_n):
     a = ((x - mu[:, None, :]) @ sinv_t[..., None])[..., 0] / norm[:, None]  # (c, R)
     a[~ok] = float("nan")
     a[~finite] = float("nan")
-    return a, n, shrink
+    return a, n, shrink, mu
 
 
 def column_matched_filter(
@@ -125,6 +126,7 @@ def column_matched_filter(
     excluded = np.zeros((rows, cols), dtype=bool)
     n_valid = np.zeros(cols, dtype=np.int64)
     shrink_out = np.full(cols, np.nan, dtype=np.float32)
+    mu_out = np.full((cols, nb), np.nan, dtype=np.float32)
     for c0 in range(0, cols, chunk):
         sl = slice(c0, min(c0 + chunk, cols))
         xc = torch.as_tensor(np.ascontiguousarray(radiance[:, sl].transpose(1, 0, 2)), device=dev)
@@ -132,11 +134,11 @@ def column_matched_filter(
         finite = torch.isfinite(xc).all(dim=-1)
         usable = finite & torch.as_tensor(np.ascontiguousarray(valid[:, sl].T), device=dev)
         xc = torch.nan_to_num(xc, nan=0.0)
-        kk = torch.as_tensor(np.ascontiguousarray(k[sl]), device=dev)
+        kk = torch.as_tensor(np.array(k[sl], dtype=np.float64), device=dev)
         keep = usable
         for _ in range(n_pass):
             used = keep
-            a, n, shrink = _filter_chunk(xc, used, finite, kk, shrinkage, min_n)
+            a, n, shrink, mu = _filter_chunk(xc, used, finite, kk, shrinkage, min_n)
             # Robust background spread per column, from the pixels the statistics used
             bg = torch.where(used, a, torch.full_like(a, float("nan")))
             med = torch.nanmedian(bg, dim=1).values
@@ -147,4 +149,5 @@ def column_matched_filter(
         excluded[:, sl] = (usable & ~used).T.cpu().numpy()
         n_valid[sl] = n.cpu().numpy()
         shrink_out[sl] = shrink.float().cpu().numpy()
-    return MatchedFilterResult(alpha, sigma, excluded, n_valid, shrink_out)
+        mu_out[sl] = mu.float().cpu().numpy()
+    return MatchedFilterResult(alpha, sigma, excluded, n_valid, shrink_out, mu_out)

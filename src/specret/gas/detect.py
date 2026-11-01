@@ -73,13 +73,29 @@ def flare_mask(scene: EmitL1B, rad: np.ndarray, idx: np.ndarray, threshold: floa
     return ndimage.binary_dilation(hot, iterations=px) if px and hot.any() else hot
 
 
-def detect(scene: EmitL1B, gas: str = "CH4", device: str | None = None) -> Enhancement:
+@dataclass
+class Prepared:
+    """A scene read once for gas work: radiance in the matched-filter bands and conditions."""
+
+    scene: EmitL1B
+    windows: list[list[float]]
+    pieces: list  # [((lo, hi), LineByLine)] where line-by-line spectra exist
+    idx: np.ndarray  # band indices into the granule
+    centers_nm: np.ndarray
+    fwhm_nm: np.ndarray
+    radiance: np.ndarray  # (rows, cols, len(idx))
+    amf_col: np.ndarray  # (cols,) mean AMF per column
+    conditions: Conditions
+    screen: np.ndarray  # (rows, cols) cloud, water and flare pixels
+    seconds: float
+
+
+def prepare(scene: EmitL1B, gas: str = "CH4") -> Prepared:
     mf = plume_config()["matched_filter"]
     windows = mf["windows"][gas]
     t0 = time.perf_counter()
     pieces = [(r, build_window(*r)) for r in lbl_ranges(windows)]
     idx = window_bands(scene, windows)
-    centers, fwhm = scene.centers_nm[idx], scene.fwhm_nm[idx]
     rad = scene.read_bands(idx)
     amf = scene.amf()
     elev = scene.elev_m[np.isfinite(scene.elev_m) & (scene.elev_m > -500)]
@@ -88,33 +104,65 @@ def detect(scene: EmitL1B, gas: str = "CH4", device: str | None = None) -> Enhan
         h2o_gcm2=scene.h2o_gcm2() or DEFAULT_H2O,
         surface_km=max(float(np.median(elev)) / 1e3, 0.0) if elev.size else 0.0,
     )
-    k_col = column_targets(pieces, centers, fwhm, base, np.nanmean(amf, axis=0), gas)
     # Clouds, water and flares are left out of the statistics and of the output
     screen = scene.cloud_water() | flare_mask(
         scene, rad, idx, mf["flare_radiance"], mf["flare_dilation_px"]
     )
+    return Prepared(
+        scene=scene,
+        windows=windows,
+        pieces=pieces,
+        idx=idx,
+        centers_nm=scene.centers_nm[idx],
+        fwhm_nm=scene.fwhm_nm[idx],
+        radiance=rad,
+        amf_col=np.nanmean(amf, axis=0),
+        conditions=base,
+        screen=screen,
+        seconds=time.perf_counter() - t0,
+    )
+
+
+def enhancement(
+    prep: Prepared,
+    gas: str = "CH4",
+    radiance: np.ndarray | None = None,
+    device: str | None = None,
+) -> Enhancement:
+    """Matched filter for `gas` on the prepared scene (or on `radiance`, e.g. with injected
+    plumes, which must have the same shape)."""
+    mf = plume_config()["matched_filter"]
+    t0 = time.perf_counter()
+    rad = prep.radiance if radiance is None else radiance
+    k_col = column_targets(
+        prep.pieces, prep.centers_nm, prep.fwhm_nm, prep.conditions, prep.amf_col, gas
+    )
     res = column_matched_filter(
         rad,
         k_col,
-        valid=~screen,
+        valid=~prep.screen,
         n_pass=mf["n_pass"],
         shrinkage=mf["shrinkage"],
         exclude_sigma=mf["exclude_sigma"],
         min_pixels_factor=mf["min_pixels_factor"],
         device=device,
     )
-    res.alpha[screen] = np.nan
+    res.alpha[prep.screen] = np.nan
     return Enhancement(
         gas=gas,
-        scene_id=scene.scene_id,
+        scene_id=prep.scene.scene_id,
         alpha=res.alpha,
         result=res,
-        conditions=base,
-        band_centers_nm=centers,
-        k=window_absorption(pieces, centers, fwhm, base, gas),
-        screened=int(screen.sum()),
-        seconds=time.perf_counter() - t0,
+        conditions=prep.conditions,
+        band_centers_nm=prep.centers_nm,
+        k=window_absorption(prep.pieces, prep.centers_nm, prep.fwhm_nm, prep.conditions, gas),
+        screened=int(prep.screen.sum()),
+        seconds=prep.seconds + time.perf_counter() - t0,
     )
+
+
+def detect(scene: EmitL1B, gas: str = "CH4", device: str | None = None) -> Enhancement:
+    return enhancement(prepare(scene, gas), gas, device=device)
 
 
 def write_enhancement(scene: EmitL1B, enh: Enhancement, out_dir: Path = OUT_DIR) -> Path:

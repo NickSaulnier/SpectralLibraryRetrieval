@@ -120,8 +120,14 @@ class ConfidenceModel:
         return p
 
     @classmethod
-    def fit(cls, df: pd.DataFrame, y: np.ndarray, l2: float = 1e-2) -> ConfidenceModel:
-        x = df[list(FEATURES)].to_numpy(dtype=np.float64)
+    def fit(
+        cls,
+        df: pd.DataFrame,
+        y: np.ndarray,
+        l2: float = 1e-2,
+        features: tuple[str, ...] = FEATURES,
+    ) -> ConfidenceModel:
+        x = df[list(features)].to_numpy(dtype=np.float64)
         ok = np.isfinite(x).all(axis=1)
         x, y = x[ok], np.asarray(y, dtype=np.float64)[ok]
         mean, std = x.mean(axis=0), x.std(axis=0) + 1e-9
@@ -139,7 +145,7 @@ class ConfidenceModel:
             return g
 
         w = minimize(loss, np.zeros(X.shape[1]), jac=grad, method="L-BFGS-B").x
-        return cls(mean, std, w)
+        return cls(mean, std, w, features=tuple(features))
 
     def save(self, path: str | Path) -> None:
         path = Path(path)

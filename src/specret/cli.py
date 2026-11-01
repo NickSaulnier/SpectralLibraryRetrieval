@@ -413,6 +413,23 @@ def cmd_compare_ghg(args: argparse.Namespace) -> None:
         Path(args.json).write_text(json.dumps(rows, indent=1))
 
 
+def cmd_gas_benchmark(args: argparse.Namespace) -> None:
+    import json
+
+    from specret.eval.gas_benchmark import evaluate, run_all
+
+    out = Path(args.out)
+    if not args.evaluate_only:
+        run_all(out, seeds=args.seeds, n_plumes=args.plumes)
+    m = evaluate(out)
+    truth = m.pop("truth")
+    truth.to_parquet(out / "truth_found.parquet")
+    (out / "metrics.json").write_text(json.dumps(m, indent=1, default=str), encoding="utf-8")
+    for k, v in m.items():
+        if k not in ("model", "id_confusion") and not k.startswith("verdicts"):
+            print(f"{k}: {v}")
+
+
 def cmd_make_splits(args: argparse.Namespace) -> None:
     from specret.eval.splits import load_split_config, make_splits, write_splits
     from specret.schema import read_library
@@ -871,6 +888,16 @@ def main(argv: list[str] | None = None) -> None:
     cg.add_argument("--out", default="outputs/gas", help="where detect-plumes wrote its maps")
     cg.add_argument("--json", help="write the metrics to this file")
     cg.set_defaults(func=cmd_compare_ghg)
+
+    gb = sub.add_parser(
+        "gas-benchmark",
+        help="G2 benchmark: injected plumes, false plumes, catalogue recall, calibration",
+    )
+    gb.add_argument("--out", default="outputs/gas/g2")
+    gb.add_argument("--seeds", type=int, default=4, help="injection draws per no-plume scene")
+    gb.add_argument("--plumes", type=int, default=25, help="plumes per draw")
+    gb.add_argument("--evaluate-only", action="store_true", help="reuse saved runs")
+    gb.set_defaults(func=cmd_gas_benchmark)
 
     dr = sub.add_parser("doctor", help="show what is set up and what to run next")
     dr.set_defaults(func=cmd_doctor)

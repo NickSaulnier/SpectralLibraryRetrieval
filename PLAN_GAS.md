@@ -118,6 +118,7 @@ src/specret/
   gas/
     library.py                # HITRAN line-by-line cross-sections per layer -> data/derived/gas/lbl_<range>.npz
     detect.py                 # scene pipeline: windows, targets, screens, matched filter, outputs
+    pipeline.py               # G2 scene analysis: both gases' maps, candidates, identification
     signatures.py             # unit absorption spectra per scene: VSWIR (AMF, H2O LUT), LWIR (thermal contrast)
     matched_filter.py         # column-wise robust mean/cov (torch), MF, ACE, two-pass plume exclusion
     identify.py               # joint multi-gas + confuser fit, BIC selection, calibrated confidence
@@ -223,6 +224,18 @@ Still open:
 - Any disagreement is written up in `results/gas_g1_ch4_mf.md`.
 
 ### Phase G2: Multi-gas identification and false-positive control, VSWIR (2–3 weeks)
+
+**Status (2026-11-01): built; 2 of 3 exit criteria pass.** Details in `results/gas_g2_identification.md`.
+- **False plumes:** down 97% on the no-plume scenes, from 309 to 8 (0.35–1.05 per 1000 km²).
+- **Calibration:** ECE 0.027, AUROC 0.95.
+- **Catalogue recall:** fails narrowly. It drops 6.1 points against the 5-point limit, losing 3 weak Turkmenistan plumes of 49, independent of the threshold.
+- **Identification:** 88% of detected injected plumes get the right named gas, with no CH4/CO2 confusion.
+- **CO2 maps vs EMIT CO2ENH:** r = 0.97–0.98. EMIT's single-pass product understates large plumes, which injected plumes confirm.
+- **Deviations from the plan:**
+  - only CH4 and CO2 are ever named; N2O, CO, NH3 and H2S are flag-only, and H2O is a nuisance term;
+  - the L2B MIN carbonate screen is a recorded flag, not a filter, because Permian plumes sit on limestone;
+  - the candidate's background covariance comes from shifted copies of its own mask;
+  - candidates come from `gas/plumes.py` now, ahead of G3.
 
 - **`gas/inject.py`:** inject synthetic plumes into real L1B radiance. Plume shapes are Gaussian-puff or LES-like masks, with known gas, α and footprint; the multiplicative Beer–Lambert term is applied at line-by-line resolution and then convolved. This is the benchmark's data, like `distort/` for minerals. Injection draws and calibration draws are kept separate.
 - **`gas/confusers.py`:** build confuser signatures from the mineral library: carbonates, hydrocarbon-bearing materials, and plastics where splib07 has them. These are the surface spectra's own 2.3 µm structure, whitened the same way. Also read the paired mineral map: a plume pixel whose mineral top-1 is a confuser group is flagged.
