@@ -161,3 +161,22 @@ th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .timeline li.seen i { background: var(--good); border-color: var(--good); }
 .timeline li.this i { background: var(--accent); border-color: var(--accent); }
 .compare-stats { margin-top: 6px; }
+
+/* Phase V5: jobs, setup, sharing */
+.tabs .count { display: inline-block; margin-left: 4px; min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; background: var(--accent); color: #fff; }
+.job { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+.job-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.job-progress progress { flex: 1 1 140px; }
+pre.log { max-height: 180px; overflow: auto; font-size: 11px; background: var(--window); padding: 6px; margin: 4px 0 0; white-space: pre-wrap; }
+.scene-picks { display: flex; flex-direction: column; gap: 2px; font-size: 12px; margin: 4px 0 6px; }
+.checklist { list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+.checklist li { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.checklist .mark { width: 14px; text-align: center; font-weight: 600; color: var(--muted); }
+.checklist li.ok .mark { color: var(--good); }
+.checklist li.required .mark { color: var(--bad); }
+.checklist .step { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+.checklist code { font-size: 11px; }
+.share { display: inline-flex; gap: 6px; align-items: center; }
+.filters .export { margin-left: auto; display: inline-flex; gap: 4px; }
+.plume-detail { position: relative; }
+.plume-detail .card-export { float: right; margin-left: 8px; }

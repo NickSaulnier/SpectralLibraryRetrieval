@@ -255,7 +255,7 @@ src/specret/viewer/
   - The COGs: enhancement per gas, ΔT, a low-contrast mask (|ΔT| < 1 K), the plume mask, and plume outlines as polygons.
   - `plume_spectra.npz` keys carry the segment, since candidate ids restart per segment.
   - Salton Sea (3,875 lines): 1,428 candidates and 5 plumes (2 NH3, 3 SO2), on a 3,426 × 3,288 grid.
-  - Dairy has no geolocation files, so its plumes are listed but not mapped. Kern River has not been run yet.
+  - Dairy has no geolocation files, so its plumes are listed but not mapped. Kern River was run from the viewer's job queue in V5.
 - **Compare view:** "Compare with …" on any of our enhancement layers that has a published counterpart.
   - **Swipe:** the published map is shown in our layer's colour stretch.
   - **Statistics:** for the visible area (or the whole scene), plume and scene pixels with n, r, Deming and OLS slopes, both background spreads, and a scatter with the 1:1 and Deming lines.
@@ -305,6 +305,36 @@ src/specret/viewer/
 - The compare view reproduces the G1 and G5 agreement numbers for the visible scene.
 
 ### Phase V5: Jobs, sharing and exports (1 week)
+
+**Status (2026-11-01): done.**
+- **One job queue** (`scene/jobs.py`): every long operation goes through one queue in the server process, and a single worker runs jobs one at a time, so GPU work never overlaps. The queue outlives page reloads.
+  - **Kinds:** mapping, plume detection (EMIT, AVIRIS-NG, HyTES), area unmixing, persistence over chosen EMIT scenes, and any `specret` command from the setup checklist (run as a subprocess).
+  - **States:** queued (with a place in line), running (progress, elapsed time, log), done, failed or cancelled.
+  - **Cancel:** a queued job is dropped; a running job stops at its next progress report; a subprocess is terminated.
+  - The MCP tools use the same queue, and report "queued" when a job has to wait.
+- **Jobs tab:** the queue with logs and Cancel, a "Repeat sightings" launcher over the analyzed EMIT scenes, and a count of active jobs on the tab.
+- **Setup from the UI:** the "Project setup" checklist is `specret doctor`.
+  - Each fix step has a Run button that queues it.
+  - Downloads behind the Earthdata login (`download emit`, `download emit-gas`) show the command to run in a terminal instead.
+  - The server accepts only steps the checklist itself lists.
+- **Sharing:** the URL follows the view: scene, tab, camera, selected plume, clicked point, drawn area, and each visible layer's opacity, stretch, colormap and category filter, in drawing order. "Copy link" copies it.
+  - A link opened in a fresh page restores the view exactly: same layers, settings, plume and camera, and the URL comes back unchanged.
+  - Layers are named in the link, not by server state, so a link survives a server restart.
+- **Exports:**
+  - **Map PNG:** the map as drawn, plus a legend panel (scene, centre, zoom, each visible layer's ramp or categories) and a scale bar.
+  - **Plume table:** CSV and GeoJSON (source points) of the rows shown after filtering, for one scene or all.
+  - **Evidence card:** one self-contained HTML file per plume, with its numbers (rates, uncertainty, terms, confidence features, repeat sightings) and its charts as embedded SVG. It has no scripts and no links.
+  - The area summary, pixel spectra and matches CSVs are unchanged.
+- **Checked in the browser:**
+  - Kern River HyTES detection (11,741 lines) queued from the Plumes tab, with persistence waiting behind it.
+    - Kern River ran in 477 s: 32 plumes (14 SO2, 7 CH4, 5 N2O, 4 NH3, 2 C2H4).
+    - Persistence then ran in 7 s: 177 plumes, 57 covered by another overpass, 9 seen again, as before.
+  - The checklist with Run buttons.
+  - A shared link restored after a reload with the queue intact, and again after a server restart (exit criterion).
+  - All four exports downloaded; the PNG and evidence card were checked by eye.
+- **Tests:** 4 new pytest tests (queue order and dedupe, cancel queued and running, subprocess commands and failures, setup endpoints) and 6 new Vitest tests (URL round trip, scale bar, plume exports, evidence card, finished-job detection, checklist), 28 in all.
+
+**Plan:**
 
 - **Jobs panel:**
   - one queue for every long operation: map scene (with or without unmixing), detect plumes (EMIT or AVIRIS-NG), the LWIR flight run, and persistence across selected scenes;

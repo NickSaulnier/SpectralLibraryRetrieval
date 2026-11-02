@@ -95,6 +95,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Job List
+         * @description Every job of this server process, newest first (logs trimmed to the last lines).
+         */
+        get: operations["job_list_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Job Cancel */
+        post: operations["job_cancel_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/persistence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Job Persistence */
+        post: operations["job_persistence_api_jobs_persistence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Setup Items
+         * @description `specret doctor` as a checklist: each item's state and the commands that fix it,
+         *     with whether the viewer can run them (downloads needing credentials cannot).
+         */
+        get: operations["setup_items_api_setup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Setup Run
+         * @description Queue one fix step of the checklist. Only steps the checklist lists are accepted.
+         */
+        post: operations["setup_run_api_setup_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -639,6 +734,16 @@ export interface components {
             /** Groups */
             groups: components["schemas"]["GroupShare"][];
         };
+        /** PersistenceRequest */
+        PersistenceRequest: {
+            /** Scenes */
+            scenes: string[];
+            /**
+             * Radius M
+             * @default 300
+             */
+            radius_m: number;
+        };
         /** PlumeSummary */
         PlumeSummary: {
             /** Count */
@@ -651,6 +756,37 @@ export interface components {
             };
             /** Ids */
             ids: number[];
+        };
+        /** SetupItem */
+        SetupItem: {
+            /** Key */
+            key: string;
+            /** Level */
+            level: string;
+            /** Name */
+            name: string;
+            /** Ok */
+            ok: boolean;
+            /** Detail */
+            detail: string;
+            /** Hint */
+            hint: string | null;
+            /** Steps */
+            steps: components["schemas"]["SetupStep"][];
+        };
+        /** SetupRun */
+        SetupRun: {
+            /** Argv */
+            argv: string[];
+        };
+        /** SetupStep */
+        SetupStep: {
+            /** Argv */
+            argv: string[];
+            /** Command */
+            command: string;
+            /** Runnable */
+            runnable: boolean;
         };
         /** UnmixRequest */
         UnmixRequest: {
@@ -776,6 +912,151 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_list_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    job_cancel_api_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_persistence_api_jobs_persistence_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersistenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setup_items_api_setup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupItem"][];
+                };
+            };
+        };
+    };
+    setup_run_api_setup_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupRun"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

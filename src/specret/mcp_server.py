@@ -180,11 +180,14 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
 
         Returns a job id; poll `job_status`. Results feed `scene_summary`.
         """
-        return {"job_id": jobs.start_map_job(ws, scene_id), "state": "running"}
+        job_id = jobs.start_map_job(ws, scene_id)
+        return {"job_id": job_id, "state": jobs.job_status(job_id)["state"]}
 
     @mcp.tool
     def job_status(job_id: str) -> dict:
-        """State of a background job (mapping or plume detection), with `progress` 0-1."""
+        """State of a background job (mapping or plume detection): "queued" (jobs run one at
+        a time; `position` is its place in line), "running" with `progress` 0-1, "done",
+        "failed" or "cancelled", with the last lines of its log."""
         return jobs.job_status(job_id)
 
     @mcp.tool
@@ -198,7 +201,8 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
         """
         if not rerun and (ws.gas_dir(scene_id) / "plumes.csv").exists():
             return {"state": "done", **gas.scene_gas_summary(ws.gas_dir(scene_id))}
-        return {"job_id": jobs.start_gas_job(ws, scene_id), "state": "running"}
+        job_id = jobs.start_gas_job(ws, scene_id)
+        return {"job_id": job_id, "state": jobs.job_status(job_id)["state"]}
 
     @mcp.tool
     def list_plumes(

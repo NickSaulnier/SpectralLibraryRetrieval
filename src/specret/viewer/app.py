@@ -148,6 +148,72 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
 
+    seen_done = [0.0]
+
+    @app.get("/api/jobs")
+    def job_list() -> list[dict]:
+        """Every job of this server process, newest first (logs trimmed to the last lines)."""
+        out = jobs.list_jobs()
+        last = max((j["finished"] or 0 for j in out if j["state"] == "done"), default=0)
+        if last > seen_done[0]:  # a job finished since the last look: outputs changed
+            seen_done[0] = last
+            scene_map.cache_clear()
+            ortho_layers.cache_clear()
+            geo_scenes.cache_clear()
+        for j in out:
+            j["log"] = j["log"][-8:]
+            if j.get("error"):
+                j["error"] = j["error"].splitlines()[0]
+        return out
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def job_cancel(job_id: str) -> dict:
+        try:
+            return jobs.cancel(job_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+    @app.post("/api/jobs/persistence")
+    def job_persistence(req: PersistenceRequest) -> dict:
+        try:
+            return {"job_id": jobs.start_persistence_job(ws, req.scenes, req.radius_m)}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.get("/api/setup")
+    def setup_items() -> list[SetupItem]:
+        """`specret doctor` as a checklist: each item's state and the commands that fix it,
+        with whether the viewer can run them (downloads needing credentials cannot)."""
+        from specret import project
+
+        return [
+            SetupItem(
+                key=it.key,
+                level=it.level,
+                name=it.name,
+                ok=it.ok,
+                detail=it.detail,
+                hint=it.hint,
+                steps=[
+                    SetupStep(argv=a, runnable=runnable_step(a), command="specret " + " ".join(a))
+                    for a in it.steps
+                ],
+            )
+            for it in project.inspect()
+        ]
+
+    @app.post("/api/setup/run")
+    def setup_run(req: SetupRun) -> dict:
+        """Queue one fix step of the checklist. Only steps the checklist lists are accepted."""
+        from specret import project
+
+        listed = {tuple(a) for it in project.inspect() for a in it.steps}
+        if tuple(req.argv) not in listed:
+            raise HTTPException(400, "not a step of the setup checklist")
+        if not runnable_step(req.argv):
+            raise HTTPException(400, "needs credentials: run it in a terminal")
+        return {"job_id": jobs.start_command_job(ws, req.argv)}
+
     @app.get("/api/jobs/{job_id}")
     def job(job_id: str) -> dict:
         try:
@@ -590,6 +656,39 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         return out
 
     return app
+
+
+CREDENTIAL_STEPS = {("download", "emit"), ("download", "emit-gas")}  # Earthdata login
+
+
+def runnable_step(argv: list[str]) -> bool:
+    """Whether the viewer may run a setup step: everything but downloads behind a login."""
+    return tuple(argv[:2]) not in CREDENTIAL_STEPS
+
+
+class PersistenceRequest(BaseModel):
+    scenes: list[str]  # analyzed EMIT scene ids
+    radius_m: float = 300.0
+
+
+class SetupStep(BaseModel):
+    argv: list[str]
+    command: str
+    runnable: bool
+
+
+class SetupItem(BaseModel):
+    key: str
+    level: str
+    name: str
+    ok: bool
+    detail: str
+    hint: str | None
+    steps: list[SetupStep]
+
+
+class SetupRun(BaseModel):
+    argv: list[str]
 
 
 class GeoScene(BaseModel):

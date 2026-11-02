@@ -1,18 +1,24 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { Map as MlMap } from "maplibre-gl";
+
 import { api, type Polygon } from "./api/client";
 import type { Identification, PlumeRow } from "./api/types";
+import { isActive } from "./hooks/useJob";
 import { parseLatLon } from "./lib";
 import { LayerPanel } from "./map/LayerPanel";
 import { mergeLayers, moveLayer, type LayerState } from "./map/layerState";
 import { MapView, type Bounds, type DrawMode } from "./map/MapView";
 import { AreaPanel } from "./panels/AreaPanel";
+import { JobsPanel } from "./panels/JobsPanel";
 import type { Pin } from "./panels/PixelEvidence";
 import { PixelPanel } from "./panels/PixelPanel";
 import { PlumesPanel } from "./panels/PlumesPanel";
+import { mapPng } from "./exports";
+import { applyShared, decodeView, encodeView, type Camera, type ViewState } from "./viewState";
 
-type Tab = "layers" | "pixel" | "plumes" | "area";
+type Tab = "layers" | "pixel" | "plumes" | "area" | "jobs";
 
 export function App() {
   const qc = useQueryClient();
@@ -35,6 +41,13 @@ export function App() {
   const [pins, setPins] = useState<Pin[]>([]);
   const [view, setView] = useState<Bounds | null>(null);
   const [gasCompare, setGasCompare] = useState<string | null>(null);
+  const [camera, setCamera] = useState<Camera | null>(null);
+  const [jumpTo, setJumpTo] = useState<{ camera: Camera; seq: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const mapRef = useRef<MlMap | null>(null);
+  const ramps = useQuery({ queryKey: ["colormaps"], queryFn: api.colormaps, staleTime: Infinity });
+  // A shared link's view, applied once its scene and then its layers have loaded
+  const shared = useRef<ViewState | null>(decodeView(location.search));
 
   const list = scenes.data ?? [];
   const scene = list.find((s) => s.key === key) ?? null;
@@ -78,12 +91,17 @@ export function App() {
 
   // Open the first scene with a product, and fly to each scene when it is opened
   useEffect(() => {
-    if (!key && list.length) setKey((list.find((s) => s.mapped || s.analyzed) ?? list[0]).key);
+    if (key || !list.length) return;
+    const linked = list.find((s) => s.key === shared.current?.scene);
+    if (!linked) shared.current = null;
+    setKey((linked ?? list.find((s) => s.mapped || s.analyzed) ?? list[0]).key);
   }, [list, key]);
   // A plume picked from the all-scenes table opens its scene, then is selected there
   const pending = useRef<PlumeRow | null>(null);
   useEffect(() => {
-    if (scene?.bounds) setFitTo({ bounds: scene.bounds as Bounds, seq: Date.now() });
+    const link = shared.current?.scene === scene?.key ? shared.current : null;
+    if (link?.camera) setJumpTo({ camera: link.camera, seq: Date.now() });
+    else if (scene?.bounds) setFitTo({ bounds: scene.bounds as Bounds, seq: Date.now() });
     setPoint(null);
     setPlume(null);
     setSelection(null);
@@ -97,10 +115,34 @@ export function App() {
       pending.current = null;
       showPlume(p);
     }
+    if (link) {
+      if (link.plume != null) setPlume(link.plume);
+      if (link.area) setSelection(link.area);
+      if (link.point) identify(link.point.lat, link.point.lon);
+      if (link.tab) setTab(link.tab as Tab);
+      if (!link.layers) shared.current = null;
+    }
   }, [scene?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (layerInfo.data) setLayers((current) => mergeLayers(layerInfo.data, current));
+    if (!layerInfo.data) return;
+    const link = shared.current;
+    if (link?.layers && layerInfo.data[0]?.scene === link.scene) {
+      shared.current = null;
+      setLayers(applyShared(mergeLayers(layerInfo.data, []), link.layers));
+    } else setLayers((current) => mergeLayers(layerInfo.data, current));
   }, [layerInfo.data]);
+
+  // The URL follows the view, so it can be copied and shared at any time
+  useEffect(() => {
+    if (shared.current || !key) return; // still restoring a link
+    const q = encodeView({ scene: key, tab, camera, plume, point, layers, area: selection });
+    history.replaceState(null, "", `${location.pathname}?${q}`);
+  }, [key, tab, camera, plume, point, layers, selection]);
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   const identify = async (lat: number, lon: number) => {
     setPoint({ lat, lon });
@@ -151,6 +193,19 @@ export function App() {
     }
   }
 
+  // Jobs from any tab (or the MCP server) show as a count on the Jobs tab
+  const jobList = useQuery({
+    queryKey: ["jobs"],
+    queryFn: api.jobs,
+    refetchInterval: (q) => ((q.state.data ?? []).some(isActive) ? 1500 : 10000),
+  });
+  const activeJobs = (jobList.data ?? []).filter(isActive).length;
+  const refreshAll = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ["geoScenes"] });
+    qc.invalidateQueries({ queryKey: ["layers"] });
+    qc.invalidateQueries({ queryKey: ["plumesGeojson"] });
+  }, [qc]);
+
   const selectPlume = (p: PlumeRow) => {
     if (p.scene_id && p.scene_id !== key && list.some((s) => s.key === p.scene_id)) {
       pending.current = p;
@@ -192,6 +247,17 @@ export function App() {
           />
           <button type="submit">Go</button>
         </form>
+        <button type="button" onClick={copyLink} title="Copy a link to this view: scene, layers, map position and selection">
+          {copied ? "Copied" : "Copy link"}
+        </button>
+        <button
+          type="button"
+          disabled={!key}
+          title="Save the map as drawn, with a legend of the visible layers and a scale bar"
+          onClick={() => mapRef.current && mapPng(mapRef.current, layers, ramps.data ?? {}, key ?? "map")}
+        >
+          Map PNG
+        </button>
         <label className="hint basemap" title="Fetches tiles from tile.openstreetmap.org">
           <input type="checkbox" checked={basemap} onChange={(e) => setBasemap(e.target.checked)} />
           Online basemap (OpenStreetMap)
@@ -211,7 +277,12 @@ export function App() {
           drawMode={drawMode}
           selection={selection}
           compare={swipeLayer}
-          onView={setView}
+          onView={(b, c) => {
+            setView(b);
+            setCamera(c);
+          }}
+          jumpTo={jumpTo}
+          mapRef={mapRef}
           wind={wind}
           onSelection={(poly) => {
             setSelection(poly);
@@ -231,9 +302,10 @@ export function App() {
         />
         <aside className="sidebar">
           <nav className="tabs" role="tablist">
-            {(["layers", "pixel", "plumes", "area"] as Tab[]).map((t) => (
+            {(["layers", "pixel", "plumes", "area", "jobs"] as Tab[]).map((t) => (
               <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-                {{ layers: "Layers", pixel: "Pixel", plumes: "Plumes", area: "Area" }[t]}
+                {{ layers: "Layers", pixel: "Pixel", plumes: "Plumes", area: "Area", jobs: "Jobs" }[t]}
+                {t === "jobs" && activeJobs > 0 && <span className="count">{activeJobs}</span>}
               </button>
             ))}
           </nav>
@@ -290,6 +362,7 @@ export function App() {
                 onUnmixed={refresh}
               />
             )}
+            {tab === "jobs" && <JobsPanel scenes={list} onChanged={refreshAll} />}
             {tab === "plumes" && (
               <PlumesPanel
                 gasScene={scene?.gas_scene ?? null}

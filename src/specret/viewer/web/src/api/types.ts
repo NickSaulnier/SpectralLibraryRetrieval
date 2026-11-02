@@ -16,12 +16,38 @@ export interface LegendEntry {
   fraction: number;
 }
 
+/** A background job (scene/jobs.py): one queue, run one at a time. */
 export interface Job {
-  state: "running" | "done" | "failed";
-  progress: number;
+  job_id: string;
+  kind: "map" | "gas" | "unmix" | "persistence" | "command";
+  scene_id: string;
+  title: string;
+  state: "queued" | "running" | "done" | "failed" | "cancelled";
+  progress: number | null; // null: unknown (a command's progress)
   elapsed_s: number;
+  created: number;
+  finished: number | null;
+  position: number | null; // place in the queue while queued
+  cancelling: boolean;
+  log: string[];
   error?: string;
   [key: string]: unknown;
+}
+
+export interface SetupStep {
+  argv: string[];
+  command: string;
+  runnable: boolean; // false: a download that needs credentials (run it in a terminal)
+}
+
+export interface SetupItem {
+  key: string;
+  level: "required" | "recommended" | "optional";
+  name: string;
+  ok: boolean;
+  detail: string;
+  hint: string | null;
+  steps: SetupStep[];
 }
 
 /** One diagnostic window's part in a match score (rerank/sff.explain). */

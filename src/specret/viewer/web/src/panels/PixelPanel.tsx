@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import type { LayerState } from "../map/layerState";
 import type { Identification } from "../api/types";
 import { api } from "../api/client";
-import { useJob } from "../hooks/useJob";
+import { JobProgress } from "../components/JobProgress";
+import { isActive, useJob } from "../hooks/useJob";
 import { fmt, pretty } from "../lib";
 import { FieldDrop } from "./FieldDrop";
 import { addPin, PinnedSpectra, type Pin } from "./PixelEvidence";
@@ -64,13 +65,8 @@ export function PixelPanel(p: Props) {
       {p.mineralScene && !p.mapped && (
         <div className="empty">
           <p>This scene's minerals are not mapped yet (about 2 minutes for EMIT).</p>
-          {job?.state === "running" ? (
-            <div>
-              <progress max={1} value={job.progress} />
-              <div className="hint">
-                Mapping… {Math.round(100 * job.progress)}% · {job.elapsed_s} s
-              </div>
-            </div>
+          {job && isActive(job) ? (
+            <JobProgress job={job} label="Mapping" />
           ) : (
             <button
               className="primary"

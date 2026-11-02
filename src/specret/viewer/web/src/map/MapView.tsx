@@ -34,7 +34,9 @@ interface Props {
   onScene: (key: string) => void;
   onTileLoaded: (layerId: string) => void;
   onSelection: (polygon: Polygon) => void;
-  onView?: (bounds: Bounds) => void; // the visible area, after each move
+  onView?: (bounds: Bounds, camera: { lon: number; lat: number; zoom: number }) => void; // after each move
+  jumpTo?: { camera: { lon: number; lat: number; zoom: number }; seq: number } | null;
+  mapRef?: { current: MlMap | null }; // the map, for exports
 }
 
 const footprints = (scenes: GeoScene[], active: string | null): GeoJSON.FeatureCollection => ({
@@ -169,7 +171,12 @@ export function MapView(p: Props) {
     m.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
     const view = () => {
       const b = m.getBounds();
-      handlers.current.onView?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+      const c = m.getCenter();
+      handlers.current.onView?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], {
+        lon: c.lng,
+        lat: c.lat,
+        zoom: m.getZoom(),
+      });
     };
     m.on("load", () => {
       ready.current = true;
@@ -247,6 +254,7 @@ export function MapView(p: Props) {
     });
     resize.observe(el.current!);
     map.current = m;
+    if (handlers.current.mapRef) handlers.current.mapRef.current = m;
     return () => {
       resize.disconnect();
       m.remove();
@@ -310,6 +318,13 @@ export function MapView(p: Props) {
     const [w, s, e, n] = p.fitTo.bounds;
     m.fitBounds([[w, s], [e, n]], { padding: 30, duration: 600, maxZoom: 15 });
   }, [p.fitTo]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !p.jumpTo) return;
+    const { lon, lat, zoom } = p.jumpTo.camera;
+    m.jumpTo({ center: [lon, lat], zoom });
+  }, [p.jumpTo]);
 
   useEffect(() => {
     const m = map.current;

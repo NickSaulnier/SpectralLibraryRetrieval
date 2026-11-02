@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { route } from "./api/client";
-import type { Identification, PlumeRow } from "./api/types";
+import type { Identification, Job, PlumeRow } from "./api/types";
 import { initialLayers, mergeLayers, moveLayer, tileQuery } from "./map/layerState";
 import { selectionGeojson, summaryCsv } from "./panels/AreaPanel";
 import { fmt, parseLatLon, toCsv } from "./lib";
@@ -13,6 +13,9 @@ import { addPin, MAX_PINS, pinLabel } from "./panels/PixelEvidence";
 import { budgetShares } from "./panels/PlumeEvidence";
 import { compass, filterSort, NO_FILTER, sceneDate, Timeline, type PlumeFilter, type SortKey } from "./panels/PlumesPanel";
 import { lineThrough, roundBounds } from "./panels/CompareStats";
+import { Checklist, newlyFinished } from "./panels/JobsPanel";
+import { evidenceCardHtml, metresPerPixel, plumesCsv, plumesGeojson, scaleBar } from "./exports";
+import { applyShared, decodeView, encodeView } from "./viewState";
 import { windArrow } from "./map/windArrow";
 import { gapped } from "./charts/Plot";
 
@@ -303,5 +306,105 @@ describe("V4 gas across sensors", () => {
   it("draws comparison lines through the origin and rounds the view", () => {
     expect(lineThrough(0.5, [-100, 300])).toEqual({ x: [-100, 300], y: [-50, 150] });
     expect(roundBounds([-103.123456, 31.987654, -103.0, 32.0])).toEqual([-103.1235, 31.9877, -103, 32]);
+  });
+});
+
+describe("V5 sharing, exports and jobs", () => {
+  const ls = () =>
+    initialLayers([layer("rgb", "rgb"), layer("mineral_group", "categorical"), layer("ch4_enh"), layer("co2_enh")]);
+
+  it("round-trips a view through the URL", () => {
+    const layers = ls().map((l) =>
+      l.name === "ch4_enh"
+        ? { ...l, visible: true, opacity: 0.55, stretch: [0, 900] as [number, number], cmap: "rdbu_r" }
+        : l.name === "mineral_group"
+          ? { ...l, keep: [3, 7], minP: 0.4 }
+          : l,
+    );
+    const area: [number, number][] = [[-117.3, 37.5], [-117.2, 37.5], [-117.2, 37.6]];
+    const q = encodeView({ scene: "S", tab: "plumes", camera: { lon: -117.25, lat: 37.55, zoom: 11.234 }, plume: 4,
+                           point: { lat: 37.51, lon: -117.21 }, layers, area });
+    expect(q).toContain("s=S");
+    expect(q).toContain("v=-117.25,37.55,11.23");
+    const v = decodeView("?" + q);
+    expect(v).toMatchObject({ scene: "S", tab: "plumes", plume: 4, point: { lat: 37.51, lon: -117.21 }, area });
+    expect(v.layers).toEqual([
+      { name: "rgb", opacity: 1 },
+      { name: "mineral_group", opacity: 0.8, keep: [3, 7], minP: 0.4 },
+      { name: "ch4_enh", opacity: 0.55, stretch: [0, 900], cmap: "rdbu_r" },
+    ]);
+    // Applied to fresh layers: same visibility and settings, the shared ones on top in order
+    const back = applyShared(ls(), v.layers!);
+    expect(back.map((l) => [l.name, l.visible])).toEqual([
+      ["co2_enh", false], ["rgb", true], ["mineral_group", true], ["ch4_enh", true],
+    ]);
+    expect(back[3]).toMatchObject({ opacity: 0.55, stretch: [0, 900], cmap: "rdbu_r" });
+    expect(back[2]).toMatchObject({ keep: [3, 7], minP: 0.4 });
+    expect(decodeView("?v=1,2&pt=x&a=1,2;3,4")).toEqual({});
+  });
+
+  it("sizes the scale bar to a round length", () => {
+    expect(metresPerPixel(0, 0)).toBeCloseTo(40075016.686 / 512);
+    expect(scaleBar(10, 150)).toEqual({ metres: 1000, px: 100, label: "1 km" });
+    expect(scaleBar(1, 150)).toEqual({ metres: 100, px: 100, label: "100 m" });
+    expect(scaleBar(3, 150).metres).toBe(200);
+  });
+
+  const plumeRow: PlumeRow = { plume_id: 2, gas: "CH4", confidence: 0.9, source_lat: 31.5, source_lon: -103.2, n_px: 5,
+    max_alpha_ppmm: 800, q_kg_h: 400, sigma_q_kg_h: 100, u10: 2, wind_source: "HRRR", confusers_fitted: "confuser:calcite",
+    carbonate_fraction: 0.3, overpasses_covering: 2, overpasses_seen: 1 };
+
+  it("exports the plume table as CSV and GeoJSON", () => {
+    const lines = plumesCsv([plumeRow], "S1").trim().split("\n");
+    expect(lines[0].split(",").slice(0, 4)).toEqual(["scene_id", "sensor", "plume_id", "gas"]);
+    expect(lines[1].startsWith("S1,,2,CH4,0.9,31.5,-103.2")).toBe(true);
+    const gj = JSON.parse(plumesGeojson([plumeRow, { ...plumeRow, source_lat: null }], "S1"));
+    expect(gj.features).toHaveLength(1);
+    expect(gj.features[0].geometry.coordinates).toEqual([-103.2, 31.5]);
+    expect(gj.features[0].properties).toMatchObject({ scene_id: "S1", q_kg_h: 400, overpasses_seen: 1 });
+  });
+
+  it("writes a self-contained evidence card", () => {
+    const e = {
+      plume_id: 2, gas: "CH4", confidence: 0.9, verdict: "CH4", fitted_terms: { CH4: 600 }, evidence: { gas_z: 8 },
+      evidence_meaning: { gas_z: "z <of> the gas" }, carbonate_fraction: 0.3,
+      rate: { ime_kg: 50, length_m: 400, u10: 2, u_eff: 1.6, wind_source: "HRRR", q_kg_h: 400, sigma_q_kg_h: 100 },
+      relative_uncertainty: { wind: 0.3 }, cross_sectional_flux: { q_csf_kg_h: 350, transects: 5, csf_iqr_rel: 0.4 },
+    };
+    const html = evidenceCardHtml(e, plumeRow, "S1", [{ title: "Plume fit", src: "data:image/svg+xml,%3Csvg%3E" }]);
+    expect(html).toContain("<title>Plume 2 (CH4) – S1</title>");
+    expect(html).toContain("400 ± 100 kg/h");
+    expect(html).toContain("350 kg/h, 5 transects, IQR 40%");
+    expect(html).toContain("1 of 2 other overpasses");
+    expect(html).toContain("z &lt;of&gt; the gas");
+    expect(html).toContain('src="data:image/svg+xml,%3Csvg%3E"');
+    expect(html).not.toMatch(/<script|https?:\/\//);
+  });
+
+  it("tells which jobs just finished", () => {
+    const j = (id: string, state: Job["state"]) => ({ job_id: id, state }) as Job;
+    expect(newlyFinished([j("a", "running"), j("b", "queued"), j("c", "done")],
+                         [j("a", "done"), j("b", "running"), j("c", "done")])).toEqual(["a"]);
+  });
+
+  it("offers Run only for steps the viewer can do", () => {
+    const onRun = vi.fn();
+    render(
+      <Checklist
+        onRun={onRun}
+        items={[
+          { key: "a", level: "required", name: "Canonical library", ok: false, detail: "missing", hint: null,
+            steps: [{ argv: ["ingest"], command: "specret ingest", runnable: true }] },
+          { key: "b", level: "optional", name: "EMIT radiance", ok: false, detail: "none", hint: null,
+            steps: [{ argv: ["download", "emit-gas"], command: "specret download emit-gas", runnable: false }] },
+          { key: "c", level: "recommended", name: "Split", ok: true, detail: "ok", hint: null, steps: [] },
+        ]}
+      />,
+    );
+    const runs = screen.getAllByRole("button", { name: "Run" });
+    expect(runs).toHaveLength(1);
+    fireEvent.click(runs[0]);
+    expect(onRun).toHaveBeenCalledWith(["ingest"]);
+    expect(screen.getByText(/run it in a terminal/)).toBeInTheDocument();
   });
 });

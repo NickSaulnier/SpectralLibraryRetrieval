@@ -9,6 +9,7 @@ import type {
   PlumeExplanation,
   PlumeRow,
   SceneInfo,
+  SetupItem,
 } from "./types";
 
 type Path = keyof paths;
@@ -64,6 +65,22 @@ export const api = {
   startMapping: (sceneId: string) =>
     json<{ job_id: string }>(route("/api/map/{scene_id}", { scene_id: sceneId }), { method: "POST" }),
   job: (jobId: string) => json<Job>(route("/api/jobs/{job_id}", { job_id: jobId })),
+  jobs: () => json<Job[]>(route("/api/jobs")),
+  cancelJob: (jobId: string) =>
+    json<Job>(route("/api/jobs/{job_id}/cancel", { job_id: jobId }), { method: "POST" }),
+  startPersistence: (scenes: string[]) =>
+    json<{ job_id: string }>(route("/api/jobs/persistence"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenes }),
+    }),
+  setup: () => json<SetupItem[]>(route("/api/setup")),
+  runSetupStep: (argv: string[]) =>
+    json<{ job_id: string }>(route("/api/setup/run"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ argv }),
+    }),
   mapUrl: (sceneId: string) => route("/api/map/{scene_id}.png", { scene_id: sceneId }),
   legend: (sceneId: string) => json<LegendEntry[]>(route("/api/legend/{scene_id}", { scene_id: sceneId })),
   pixel: (sceneId: string, q: { x?: number; y?: number; lat?: number; lon?: number }) =>

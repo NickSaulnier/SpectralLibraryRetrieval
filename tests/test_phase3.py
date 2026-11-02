@@ -338,7 +338,7 @@ def test_viewer_maps_scene_in_background(workspace_root):
     job_id = client.post("/api/map/f_job_img").json()["job_id"]
     for _ in range(300):
         job = client.get(f"/api/jobs/{job_id}").json()
-        if job["state"] != "running":
+        if job["state"] not in ("queued", "running"):
             break
         time.sleep(0.1)
     assert job["state"] == "done" and job["progress"] == 1.0

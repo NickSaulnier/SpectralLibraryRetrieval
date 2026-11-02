@@ -1,10 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api/client";
 import type { GasSummaryPart, PlumeExplanation, PlumeRow } from "../api/types";
-import { useJob } from "../hooks/useJob";
-import { fmt } from "../lib";
+import { JobProgress } from "../components/JobProgress";
+import { isActive, useJob } from "../hooks/useJob";
+import { downloadEvidenceCard, plumesCsv, plumesGeojson } from "../exports";
+import { download, fmt } from "../lib";
 import { FitChart, Rates, SignatureChart } from "./PlumeEvidence";
 
 interface Props {
@@ -88,15 +90,8 @@ export function PlumesPanel({ gasScene, sensor, analyzed, selected, onSelect, on
     body = <PlumeTable rows={all.data ?? []} selected={selected} currentScene={gasScene} onSelect={onSelect} allScenes />;
   } else if (!gasScene) {
     body = <p className="hint">This scene has no radiance for gas detection.</p>;
-  } else if (job?.state === "running") {
-    body = (
-      <div>
-        <progress max={1} value={job.progress} />
-        <div className="hint">
-          Detecting… {Math.round(100 * job.progress)}% · {job.elapsed_s} s
-        </div>
-      </div>
-    );
+  } else if (job && isActive(job)) {
+    body = <JobProgress job={job} label="Detecting" />;
   } else if (!analyzed) {
     body = (
       <div className="empty">
@@ -217,6 +212,28 @@ function PlumeTable({
         <span className="hint">
           {shown.length} of {rows.length}
         </span>
+        <span className="export">
+          <button
+            type="button"
+            disabled={!shown.length}
+            onClick={() => download(`${allScenes ? "all_scenes" : currentScene}_plumes.csv`, plumesCsv(shown, currentScene ?? undefined))}
+          >
+            CSV
+          </button>
+          <button
+            type="button"
+            disabled={!shown.length}
+            onClick={() =>
+              download(
+                `${allScenes ? "all_scenes" : currentScene}_plumes.geojson`,
+                plumesGeojson(shown, currentScene ?? undefined),
+                "application/geo+json",
+              )
+            }
+          >
+            GeoJSON
+          </button>
+        </span>
       </div>
       <div className="table-scroll">
         <table className="plume-table">
@@ -320,8 +337,17 @@ function PlumeDetail({ plume, e, scene }: { plume: PlumeRow; e: PlumeExplanation
   const v = e.wind?.wind_v;
   const hasWind = u != null && v != null && Number.isFinite(u) && Number.isFinite(v);
   const hasRate = e.rate.q_kg_h != null && Number.isFinite(e.rate.q_kg_h);
+  const root = useRef<HTMLDivElement>(null);
   return (
-    <div className="plume-detail">
+    <div className="plume-detail" ref={root}>
+      <button
+        type="button"
+        className="card-export"
+        title="Save this plume's numbers and charts as one HTML file"
+        onClick={() => root.current && downloadEvidenceCard(root.current, e, plume, scene)}
+      >
+        Evidence card
+      </button>
       <b>
         Plume {e.plume_id}: {e.gas}
       </b>

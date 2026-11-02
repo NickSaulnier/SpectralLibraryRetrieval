@@ -123,6 +123,175 @@
     }
    }
   },
+  "/api/jobs": {
+   "get": {
+    "summary": "Job List",
+    "description": "Every job of this server process, newest first (logs trimmed to the last lines).",
+    "operationId": "job_list_api_jobs_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         "type": "array",
+         "title": "Response Job List Api Jobs Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/jobs/{job_id}/cancel": {
+   "post": {
+    "summary": "Job Cancel",
+    "operationId": "job_cancel_api_jobs__job_id__cancel_post",
+    "parameters": [
+     {
+      "name": "job_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Job Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Job Cancel Api Jobs  Job Id  Cancel Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/jobs/persistence": {
+   "post": {
+    "summary": "Job Persistence",
+    "operationId": "job_persistence_api_jobs_persistence_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PersistenceRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Job Persistence Api Jobs Persistence Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/setup": {
+   "get": {
+    "summary": "Setup Items",
+    "description": "`specret doctor` as a checklist: each item's state and the commands that fix it,\nwith whether the viewer can run them (downloads needing credentials cannot).",
+    "operationId": "setup_items_api_setup_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/SetupItem"
+         },
+         "type": "array",
+         "title": "Response Setup Items Api Setup Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/setup/run": {
+   "post": {
+    "summary": "Setup Run",
+    "description": "Queue one fix step of the checklist. Only steps the checklist lists are accepted.",
+    "operationId": "setup_run_api_setup_run_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SetupRun"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "type": "object",
+         "title": "Response Setup Run Api Setup Run Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/jobs/{job_id}": {
    "get": {
     "summary": "Job",
@@ -1606,6 +1775,27 @@
     ],
     "title": "MineralSummary"
    },
+   "PersistenceRequest": {
+    "properties": {
+     "scenes": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Scenes"
+     },
+     "radius_m": {
+      "type": "number",
+      "title": "Radius M",
+      "default": 300.0
+     }
+    },
+    "type": "object",
+    "required": [
+     "scenes"
+    ],
+    "title": "PersistenceRequest"
+   },
    "PlumeSummary": {
     "properties": {
      "count": {
@@ -1637,6 +1827,101 @@
      "ids"
     ],
     "title": "PlumeSummary"
+   },
+   "SetupItem": {
+    "properties": {
+     "key": {
+      "type": "string",
+      "title": "Key"
+     },
+     "level": {
+      "type": "string",
+      "title": "Level"
+     },
+     "name": {
+      "type": "string",
+      "title": "Name"
+     },
+     "ok": {
+      "type": "boolean",
+      "title": "Ok"
+     },
+     "detail": {
+      "type": "string",
+      "title": "Detail"
+     },
+     "hint": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hint"
+     },
+     "steps": {
+      "items": {
+       "$ref": "#/components/schemas/SetupStep"
+      },
+      "type": "array",
+      "title": "Steps"
+     }
+    },
+    "type": "object",
+    "required": [
+     "key",
+     "level",
+     "name",
+     "ok",
+     "detail",
+     "hint",
+     "steps"
+    ],
+    "title": "SetupItem"
+   },
+   "SetupRun": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Argv"
+     }
+    },
+    "type": "object",
+    "required": [
+     "argv"
+    ],
+    "title": "SetupRun"
+   },
+   "SetupStep": {
+    "properties": {
+     "argv": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Argv"
+     },
+     "command": {
+      "type": "string",
+      "title": "Command"
+     },
+     "runnable": {
+      "type": "boolean",
+      "title": "Runnable"
+     }
+    },
+    "type": "object",
+    "required": [
+     "argv",
+     "command",
+     "runnable"
+    ],
+    "title": "SetupStep"
    },
    "UnmixRequest": {
     "properties": {

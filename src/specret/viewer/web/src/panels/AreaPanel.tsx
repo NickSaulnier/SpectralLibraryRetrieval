@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, type AreaSummary, type Polygon } from "../api/client";
-import { useJob } from "../hooks/useJob";
+import { JobProgress } from "../components/JobProgress";
+import { isActive, useJob } from "../hooks/useJob";
 import { download, fmt, pretty, toCsv } from "../lib";
 import type { DrawMode } from "../map/MapView";
 
@@ -152,20 +153,18 @@ export function AreaPanel(p: Props) {
             {p.canUnmix && (
               <button
                 className="primary"
-                disabled={job?.state === "running"}
+                disabled={isActive(job)}
                 onClick={async () => setJobId((await api.unmixArea(p.sceneKey!, p.selection!)).job_id)}
               >
                 Unmix this area
               </button>
             )}
           </div>
-          {job?.state === "running" && (
-            <div>
-              <progress max={1} value={job.progress} />
-              <div className="hint">
-                Unmixing… {Math.round(100 * job.progress)}% · {job.elapsed_s} s (up to 3,000 pixels; larger areas use a coarser grid)
-              </div>
-            </div>
+          {job && isActive(job) && (
+            <>
+              <JobProgress job={job} label="Unmixing" />
+              <div className="hint">Up to 3,000 pixels; larger areas use a coarser grid.</div>
+            </>
           )}
           {job?.state === "done" && <p className="hint">Done: the fraction layers are in the Layers tab, under Unmixing.</p>}
           {job?.state === "failed" && <p className="hint">Unmixing failed: {job.error?.split("\n")[0]}</p>}
