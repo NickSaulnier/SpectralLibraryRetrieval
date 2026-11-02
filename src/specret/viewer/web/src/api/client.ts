@@ -1,11 +1,13 @@
 import type { components, paths } from "./schema";
 import type {
+  Comparison,
   GasPlumes,
   GasScene,
   Identification,
   Job,
   LegendEntry,
   PlumeExplanation,
+  PlumeRow,
   SceneInfo,
 } from "./types";
 
@@ -99,6 +101,11 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ polygon, max_pixels: maxPixels }),
     }),
+  allPlumes: () => json<PlumeRow[]>(route("/api/gas/plumes")),
+  compare: (key: string, layer: string, bbox?: [number, number, number, number]) =>
+    json<Comparison>(
+      `${route("/api/geo/{key}/compare", { key })}?${query({ layer, bbox: bbox?.map((v) => v.toFixed(5)).join(",") })}`,
+    ),
   agreement: (key: string) => json<Agreement>(route("/api/geo/{key}/agreement", { key })),
   plume: (sceneId: string, plumeId: number) =>
     json<PlumeExplanation>(

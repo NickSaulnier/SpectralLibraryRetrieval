@@ -5,6 +5,7 @@ Everything is discovered from the project's data folders and loaded lazily, then
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,19 @@ class SceneInfo:
     scene_id: str
     path: Path
     kind: str  # "emit" or "aviris"
+
+
+@dataclass
+class GasSource:
+    """Radiance a gas analysis runs on: an EMIT L1B granule, an AVIRIS-NG line or a HyTES
+    flight."""
+
+    scene_id: str
+    path: Path  # L1B .nc, AVIRIS-NG radiance header, or HyTES flight folder
+    sensor: str  # "EMIT", "AVIRIS-NG" or "HyTES"
+
+
+HYTES_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d{6}\.")  # 2013-04-26.220007.Dairy.Line1
 
 
 @dataclass
@@ -86,7 +100,24 @@ class Workspace:
         root = self.root / "data/scenes"
         return {scene_id(p): p for p in sorted(root.rglob("EMIT_L1B_RAD_*.nc"))}
 
+    def gas_sources(self) -> dict[str, GasSource]:
+        """Every radiance source for gas work, by id: EMIT scenes, AVIRIS-NG lines and HyTES
+        flights."""
+        root = self.root / "data/scenes"
+        out = {sid: GasSource(sid, p, "EMIT") for sid, p in self.gas_scenes().items()}
+        for hdr in sorted((root / "avirisng").rglob("*_rdn_*_img.hdr")):
+            line = hdr.parent.name
+            out[line] = GasSource(line, hdr, "AVIRIS-NG")
+        hytes = root / "hytes"
+        for d in sorted(hytes.iterdir()) if hytes.is_dir() else []:
+            if d.is_dir() and any(d.glob("*level_1a.hdr")):
+                out[d.name] = GasSource(d.name, d, "HyTES")
+        return out
+
     def gas_dir(self, scene_id: str) -> Path:
+        """outputs/gas/<id>, or outputs/gas/hytes/<flight> for HyTES flights."""
+        if HYTES_NAME.match(scene_id):
+            return self.root / "outputs/gas/hytes" / scene_id
         return self.root / "outputs/gas" / scene_id
 
     # --- loading ---------------------------------------------------------------------

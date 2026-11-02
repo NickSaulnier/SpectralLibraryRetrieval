@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Polygon } from "./api/client";
 import type { Identification, PlumeRow } from "./api/types";
@@ -33,6 +33,8 @@ export function App() {
   const [selection, setSelection] = useState<Polygon | null>(null);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [pins, setPins] = useState<Pin[]>([]);
+  const [view, setView] = useState<Bounds | null>(null);
+  const [gasCompare, setGasCompare] = useState<string | null>(null);
 
   const list = scenes.data ?? [];
   const scene = list.find((s) => s.key === key) ?? null;
@@ -59,6 +61,15 @@ export function App() {
       ? { lat, lon, u, v }
       : null;
   }, [plumeDetail.data]);
+  // Swipe: one layer against the map, or a published map in our layer's colour stretch
+  const swipeLayer = useMemo(() => {
+    const ours = layers.find((l) => l.id === gasCompare);
+    if (ours?.compare_with) {
+      const ref = layers.find((l) => l.name === ours.compare_with);
+      return ref ? { ...ref, stretch: ours.stretch, cmap: ours.cmap } : null;
+    }
+    return layers.find((l) => l.id === compareId) ?? null;
+  }, [layers, gasCompare, compareId]);
   const values = useQuery({
     queryKey: ["values", key, point?.lat, point?.lon],
     queryFn: () => api.values(key!, point!.lat, point!.lon),
@@ -69,6 +80,8 @@ export function App() {
   useEffect(() => {
     if (!key && list.length) setKey((list.find((s) => s.mapped || s.analyzed) ?? list[0]).key);
   }, [list, key]);
+  // A plume picked from the all-scenes table opens its scene, then is selected there
+  const pending = useRef<PlumeRow | null>(null);
   useEffect(() => {
     if (scene?.bounds) setFitTo({ bounds: scene.bounds as Bounds, seq: Date.now() });
     setPoint(null);
@@ -76,9 +89,15 @@ export function App() {
     setSelection(null);
     setDrawMode(null);
     setCompareId(null);
+    setGasCompare(null);
     setResult(null);
     setStatus("No pixel selected.");
-  }, [scene?.key]);
+    const p = pending.current;
+    if (p && p.scene_id === scene?.key) {
+      pending.current = null;
+      showPlume(p);
+    }
+  }, [scene?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (layerInfo.data) setLayers((current) => mergeLayers(layerInfo.data, current));
   }, [layerInfo.data]);
@@ -124,11 +143,20 @@ export function App() {
     qc.invalidateQueries({ queryKey: ["plumesGeojson", key] });
   }, [qc, key]);
 
-  const selectPlume = (p: PlumeRow) => {
+  function showPlume(p: PlumeRow) {
     setPlume(p.plume_id);
     if (p.source_lat != null && p.source_lon != null) {
       const d = 0.01;
       setFitTo({ bounds: [p.source_lon - d, p.source_lat - d, p.source_lon + d, p.source_lat + d], seq: Date.now() });
+    }
+  }
+
+  const selectPlume = (p: PlumeRow) => {
+    if (p.scene_id && p.scene_id !== key && list.some((s) => s.key === p.scene_id)) {
+      pending.current = p;
+      setKey(p.scene_id);
+    } else {
+      showPlume(p);
     }
   };
 
@@ -182,7 +210,8 @@ export function App() {
           fitTo={fitTo}
           drawMode={drawMode}
           selection={selection}
-          compare={layers.find((l) => l.id === compareId) ?? null}
+          compare={swipeLayer}
+          onView={setView}
           wind={wind}
           onSelection={(poly) => {
             setSelection(poly);
@@ -213,7 +242,16 @@ export function App() {
               <LayerPanel
                 sceneKey={key}
                 compareId={compareId}
-                onCompare={setCompareId}
+                onCompare={(id) => {
+                  setCompareId(id);
+                  setGasCompare(null);
+                }}
+                view={view}
+                gasCompare={gasCompare}
+                onGasCompare={(id) => {
+                  setGasCompare(id);
+                  setCompareId(null);
+                }}
                 layers={layers}
                 onChange={(id, patch) => setLayers((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))}
                 onMove={(id, dir) => setLayers((ls) => moveLayer(ls, id, dir))}
@@ -255,6 +293,7 @@ export function App() {
             {tab === "plumes" && (
               <PlumesPanel
                 gasScene={scene?.gas_scene ?? null}
+                sensor={scene?.sensor ?? ""}
                 analyzed={!!scene?.analyzed}
                 selected={plume}
                 onSelect={selectPlume}

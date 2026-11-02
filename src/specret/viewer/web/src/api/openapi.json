@@ -418,6 +418,30 @@
     }
    }
   },
+  "/api/gas/plumes": {
+   "get": {
+    "summary": "All Plumes",
+    "description": "Every plume of every analyzed scene, line and flight, with its sensor and, for EMIT,\nhow many other overpasses saw it again (`specret gas-persistence`).",
+    "operationId": "all_plumes_api_gas_plumes_get",
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         "type": "array",
+         "title": "Response All Plumes Api Gas Plumes Get"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/gas/{scene_id}": {
    "post": {
     "summary": "Start Gas",
@@ -1047,6 +1071,73 @@
     }
    }
   },
+  "/api/geo/{key}/compare": {
+   "get": {
+    "summary": "Geo Compare",
+    "description": "Our enhancement layer against its published counterpart (the layer's compare_with)\ninside bbox \"west,south,east,north\" (default: the whole scene): r, OLS and Deming\nslopes on plume and scene pixels, background spreads, and a sample for a scatter.",
+    "operationId": "geo_compare_api_geo__key__compare_get",
+    "parameters": [
+     {
+      "name": "key",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Key"
+      }
+     },
+     {
+      "name": "layer",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Layer"
+      }
+     },
+     {
+      "name": "bbox",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Bbox"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Geo Compare Api Geo  Key  Compare Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/colormaps": {
    "get": {
     "summary": "Colormaps",
@@ -1334,6 +1425,17 @@
      "note": {
       "type": "string",
       "title": "Note"
+     },
+     "compare_with": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Compare With"
      }
     },
     "type": "object",

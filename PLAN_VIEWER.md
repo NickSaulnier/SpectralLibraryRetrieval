@@ -246,6 +246,45 @@ src/specret/viewer/
 
 ### Phase V4: Gas across sensors and comparisons (2 weeks)
 
+**Status (2026-11-01): done.**
+- **One gas pipeline entry for three sensors:** `Workspace.gas_sources()` lists EMIT L1B scenes, AVIRIS-NG lines and HyTES flights, and `gas_dir` puts HyTES under `outputs/gas/hytes/`. The viewer's detection job, the scene list and MCP `list_resources` all use it, so "Detect plumes" works for each sensor.
+- **AVIRIS-NG:** `detect-plumes ang20161001t205456` writes the same outputs as EMIT: 239 candidates, 19 plumes, outlines and fit spectra.
+  - The published Duren et al. CH4 map is a reference layer.
+  - Confidence and rates still use EMIT's calibration, as G5 noted; one CO2 rate is negative.
+- **HyTES:** `detect-plumes-lwir` now also writes map-grid COGs, gridded from the flight's per-pixel lat/lon (`gas/grid.py`: nearest pixel within 1.5 cells, searching only cells next to data).
+  - The COGs: enhancement per gas, ΔT, a low-contrast mask (|ΔT| < 1 K), the plume mask, and plume outlines as polygons.
+  - `plume_spectra.npz` keys carry the segment, since candidate ids restart per segment.
+  - Salton Sea (3,875 lines): 1,428 candidates and 5 plumes (2 NH3, 3 SO2), on a 3,426 × 3,288 grid.
+  - Dairy has no geolocation files, so its plumes are listed but not mapped. Kern River has not been run yet.
+- **Compare view:** "Compare with …" on any of our enhancement layers that has a published counterpart.
+  - **Swipe:** the published map is shown in our layer's colour stretch.
+  - **Statistics:** for the visible area (or the whole scene), plume and scene pixels with n, r, Deming and OLS slopes, both background spreads, and a scatter with the 1:1 and Deming lines.
+  - **Plume pixels:** chosen by the recipe each comparison was validated with. For EMIT, the L2B plume complexes, with the background outside them setting the noise ratio (G1). For the AVIRIS-NG map, its own smoothed z > 4 regions (G5). `eval/ghg_compare.compare_arrays` is shared with G1.
+  - **Reproduced exactly, whole scene:**
+
+    | Scene | r (plume pixels) | Deming slope | r (all pixels) | σ, ours / reference (ppm·m) |
+    |---|---:|---:|---:|---:|
+    | Permian 20230608T162322 (EMIT, G1) | 0.9294 | 0.997 | 0.941 | |
+    | Permian 20230608T162334 (EMIT, G1) | 0.9247 | 0.952 | | |
+    | ang20161001t205456 (AVIRIS-NG, G5 default row) | 0.564 | 0.93 | 0.635 | 142 / 306 |
+- **Plume table:**
+  - **Scope:** this scene, or all scenes: 201 plumes from 6 EMIT scenes, the AVIRIS-NG line and the Salton Sea flight.
+  - **Columns:** sensor and date, gas, confidence, both rates, wind and its source, confusers, and "seen again".
+  - **Sorting and filters:** sort by any column; filter by gas, sensor, minimum confidence, and whether a confuser was fitted.
+  - **Clicking a row** of another scene opens that scene, selects the plume and flies to it.
+- **Persistence:** `gas-persistence` now also records which overpasses covered each source (`covered_by`).
+  - Plumes get a "seen in n of m" badge, and the plume panel shows a timeline of those overpasses.
+  - The six analyzed EMIT scenes: 177 plumes, 57 covered by another overpass, 9 seen again (as in G5).
+- **Checked in the browser:** the AVIRIS-NG compare (swipe and whole-scene numbers), the Salton Sea layers, mask, outlines and NH3 plume evidence, the all-scenes table with sensor filter and repeat sort, a cross-scene jump with its timeline, and the EMIT compare through the API.
+- **Tests:** 6 new pytest tests and 4 new Vitest tests (22 in all), covering:
+  - gridding, the HyTES writer and multi-sensor sources;
+  - the compare view over part of a scene;
+  - persistence overpasses;
+  - the compare and all-plumes endpoints;
+  - table filter and sort, scene dates, the timeline, and the comparison lines.
+
+**Plan:**
+
 - **AVIRIS-NG:** `detect-plumes` on an `ang…` line writes the same outputs as EMIT, and the viewer lists AVIRIS-NG lines beside EMIT scenes. The published Duren et al. CH4 map is a reference layer.
 - **HyTES:**
   - `detect-plumes-lwir` also writes map-grid COGs (enhancement per gas, the ΔT layer, and the low-contrast mask), gridded from the flight's per-pixel lat/lon;

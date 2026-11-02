@@ -34,6 +34,7 @@ interface Props {
   onScene: (key: string) => void;
   onTileLoaded: (layerId: string) => void;
   onSelection: (polygon: Polygon) => void;
+  onView?: (bounds: Bounds) => void; // the visible area, after each move
 }
 
 const footprints = (scenes: GeoScene[], active: string | null): GeoJSON.FeatureCollection => ({
@@ -166,10 +167,16 @@ export function MapView(p: Props) {
     });
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
     m.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+    const view = () => {
+      const b = m.getBounds();
+      handlers.current.onView?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    };
     m.on("load", () => {
       ready.current = true;
       m.fire("specret:sync");
+      view();
     });
+    m.on("moveend", view);
 
     // Drawing: a box by dragging, a polygon by clicking vertices and double-clicking to close
     m.on("mousedown", (e) => {

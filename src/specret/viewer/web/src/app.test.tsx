@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { route } from "./api/client";
-import type { Identification } from "./api/types";
+import type { Identification, PlumeRow } from "./api/types";
 import { initialLayers, mergeLayers, moveLayer, tileQuery } from "./map/layerState";
 import { selectionGeojson, summaryCsv } from "./panels/AreaPanel";
 import { fmt, parseLatLon, toCsv } from "./lib";
@@ -11,7 +11,8 @@ import { PlumesPanel } from "./panels/PlumesPanel";
 import { matchesCsv, ResultPanel, spectraCsv } from "./panels/ResultPanel";
 import { addPin, MAX_PINS, pinLabel } from "./panels/PixelEvidence";
 import { budgetShares } from "./panels/PlumeEvidence";
-import { compass } from "./panels/PlumesPanel";
+import { compass, filterSort, NO_FILTER, sceneDate, Timeline, type PlumeFilter, type SortKey } from "./panels/PlumesPanel";
+import { lineThrough, roundBounds } from "./panels/CompareStats";
 import { windArrow } from "./map/windArrow";
 import { gapped } from "./charts/Plot";
 
@@ -146,7 +147,7 @@ describe("PlumesPanel", () => {
     const onSelect = vi.fn();
     const ui = (selected: number | null) => (
       <QueryClientProvider client={client}>
-        <PlumesPanel gasScene="S1" analyzed selected={selected} onSelect={onSelect} onChanged={() => {}} />
+        <PlumesPanel gasScene="S1" sensor="EMIT" analyzed selected={selected} onSelect={onSelect} onChanged={() => {}} />
       </QueryClientProvider>
     );
     const client = new QueryClient();
@@ -170,7 +171,7 @@ describe("PlumesPanel", () => {
   it("offers detection when the scene is not analyzed", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <PlumesPanel gasScene="S2" analyzed={false} selected={null} onSelect={() => {}} onChanged={() => {}} />
+        <PlumesPanel gasScene="S2" sensor="EMIT" analyzed={false} selected={null} onSelect={() => {}} onChanged={() => {}} />
       </QueryClientProvider>,
     );
     expect(screen.getByRole("button", { name: "Detect plumes" })).toBeInTheDocument();
@@ -257,5 +258,50 @@ describe("V3 evidence", () => {
     await waitFor(() => expect(plotted.length).toBeGreaterThanOrEqual(2));
     const inset = plotted.find((t) => (t as { name: string }[])[0].name === "pixel" && t.length === 2) as { y: number[] }[];
     expect(inset[0].y).toEqual([1, 0.89]); // continuum-removed: 1 - depth
+  });
+});
+
+describe("V4 gas across sensors", () => {
+  const row = (over: Partial<PlumeRow>): PlumeRow => ({
+    plume_id: 1, gas: "CH4", confidence: 0.9, source_lat: 31.5, source_lon: -103.2, n_px: 10, max_alpha_ppmm: 500,
+    q_kg_h: 100, sigma_q_kg_h: 50, u10: 2, wind_source: "HRRR", confusers_fitted: null, carbonate_fraction: null,
+    ...over,
+  });
+
+  it("filters and sorts plumes, missing values last", () => {
+    const rows = [
+      row({ plume_id: 1, q_kg_h: 100, sensor: "EMIT" }),
+      row({ plume_id: 2, q_kg_h: null, sensor: "HyTES", gas: "NH3" }),
+      row({ plume_id: 3, q_kg_h: 900, sensor: "EMIT", confusers_fitted: "confuser:calcite", confidence: 0.4 }),
+    ];
+    const ids = (f: Partial<PlumeFilter>, key: SortKey = "q_kg_h", desc = true) =>
+      filterSort(rows, { ...NO_FILTER, ...f }, key, desc).map((r) => r.plume_id);
+    expect(ids({})).toEqual([3, 1, 2]);
+    expect(ids({}, "q_kg_h", false)).toEqual([1, 3, 2]);
+    expect(ids({ sensor: "EMIT" })).toEqual([3, 1]);
+    expect(ids({ gas: "NH3" })).toEqual([2]);
+    expect(ids({ confusers: "with" })).toEqual([3]);
+    expect(ids({ confusers: "without" })).toEqual([1, 2]);
+    expect(ids({ minConfidence: 0.5 })).toEqual([1, 2]);
+  });
+
+  it("dates scenes from all three sensors", () => {
+    expect(sceneDate("20230608T162322_2315911_014")).toBe("2023-06-08");
+    expect(sceneDate("ang20161001t205456")).toBe("2016-10-01");
+    expect(sceneDate("2014-07-06.194610.SaltonSea.Line2")).toBe("2014-07-06");
+  });
+
+  it("lists the overpasses over a source in date order", () => {
+    const p = row({ covered_by: ["20240101T000000_2400000_001", "20220101T000000_2200000_001"],
+                    seen_in: ["20240101T000000_2400000_001"] });
+    render(<Timeline plume={p} scene="20230608T162322_2315911_014" />);
+    expect(screen.getByText(/seen in 1 of 2/)).toBeInTheDocument();
+    const items = screen.getAllByRole("listitem").map((li) => li.textContent);
+    expect(items).toEqual(["2022-01-01 not seen", "2023-06-08 this scene", "2024-01-01 seen"]);
+  });
+
+  it("draws comparison lines through the origin and rounds the view", () => {
+    expect(lineThrough(0.5, [-100, 300])).toEqual({ x: [-100, 300], y: [-50, 150] });
+    expect(roundBounds([-103.123456, 31.987654, -103.0, 32.0])).toEqual([-103.1235, 31.9877, -103, 32]);
   });
 });

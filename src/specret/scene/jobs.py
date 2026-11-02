@@ -91,10 +91,11 @@ def job_status(job_id: str) -> dict:
 
 
 def start_gas_job(ws, scene_id: str) -> str:
-    """Detect, identify and quantify plumes in an EMIT L1B scene, or return the running job."""
-    path = ws.gas_scenes().get(scene_id)
-    if path is None:
-        raise ValueError(f"no EMIT L1B radiance for '{scene_id}'; have {sorted(ws.gas_scenes())}")
+    """Detect, identify and quantify plumes in an EMIT scene or an AVIRIS-NG line, or detect
+    and identify them in a HyTES flight; or return the job already running for it."""
+    src = ws.gas_sources().get(scene_id)
+    if src is None:
+        raise ValueError(f"no radiance for '{scene_id}'; have {sorted(ws.gas_sources())}")
     with _LOCK:
         if (job_id := _running(scene_id, "gas")) is not None:
             return job_id
@@ -108,27 +109,64 @@ def start_gas_job(ws, scene_id: str) -> str:
         }
 
     def work() -> None:
+        try:
+            if src.sensor == "HyTES":
+                _hytes(src)
+            else:
+                _vswir(src)
+        except Exception as exc:  # reported through job_status
+            JOBS[job_id].update(state="failed", error=f"{exc}\n{traceback.format_exc()}")
+
+    def _vswir(src) -> None:
         from specret.gas.detect import prepare
         from specret.gas.outputs import write_scene
         from specret.gas.pipeline import analyze, build_plumes
-        from specret.io.emit_l1b import open_emit_l1b
 
-        try:
-            prep = prepare(open_emit_l1b(path))
-            JOBS[job_id]["progress"] = 0.2
-            enh, recs = analyze(prep)
-            JOBS[job_id]["progress"] = 0.8
-            plumes = build_plumes(prep, enh, recs)
-            folder = write_scene(prep, enh, recs, plumes, ws.gas_dir(scene_id).parent)
-            JOBS[job_id].update(
-                state="done",
-                progress=1.0,
-                plumes=len(plumes),
-                candidates=len(recs),
-                outputs=str(folder),
-            )
-        except Exception as exc:  # reported through job_status
-            JOBS[job_id].update(state="failed", error=f"{exc}\n{traceback.format_exc()}")
+        if src.sensor == "AVIRIS-NG":
+            from specret.io.avirisng import open_avirisng
+
+            scene = open_avirisng(src.path)
+        else:
+            from specret.io.emit_l1b import open_emit_l1b
+
+            scene = open_emit_l1b(src.path)
+        prep = prepare(scene)
+        JOBS[job_id]["progress"] = 0.2
+        enh, recs = analyze(prep)
+        JOBS[job_id]["progress"] = 0.8
+        plumes = build_plumes(prep, enh, recs)
+        folder = write_scene(prep, enh, recs, plumes, ws.gas_dir(scene_id).parent)
+        JOBS[job_id].update(
+            state="done",
+            progress=1.0,
+            plumes=len(plumes),
+            candidates=len(recs),
+            outputs=str(folder),
+        )
+
+    def _hytes(src) -> None:
+        from specret.gas.library import plume_config
+        from specret.gas.lwir import analyze_flight, write_flight
+        from specret.io.hytes import open_hytes
+
+        flight = open_hytes(src.path)
+        seg = plume_config()["lwir"]["segment_rows"]
+        n_seg = max(1, flight.shape[0] // seg)
+        done = []
+
+        def log(msg: str) -> None:
+            done.append(msg)
+            JOBS[job_id]["progress"] = min(0.95, len(done) / n_seg)
+
+        df, maps = analyze_flight(flight, log=log)
+        folder = write_flight(flight, df, maps, ws.gas_dir(scene_id).parent)
+        import pandas as pd
+
+        plumes = folder / "plumes.csv"
+        n = len(pd.read_csv(plumes)) if plumes.stat().st_size > 1 else 0
+        JOBS[job_id].update(
+            state="done", progress=1.0, plumes=n, candidates=len(df), outputs=str(folder)
+        )
 
     threading.Thread(target=work, daemon=True).start()
     return job_id

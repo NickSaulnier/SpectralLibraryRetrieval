@@ -25,8 +25,9 @@ mineral group is right, and a tier: confident (>= 0.5), uncertain (0.3-0.5) or
 mixtures: use `unmix_pixel` to split one into library endmembers with fractions.
 Mineral groups follow configs/taxonomy.yaml.
 
-Gas plumes (CH4, CO2) are found in EMIT L1B radiance scenes (`gas_scenes` in
-`list_resources`): `detect_plumes` runs detection in the background, then `list_plumes`,
+Gas plumes (CH4, CO2) are found in EMIT L1B radiance scenes and AVIRIS-NG lines, and LWIR
+gases (CH4, N2O, NH3, SO2, C2H4) in HyTES flights (`gas_scenes` in `list_resources`):
+`detect_plumes` runs detection in the background, then `list_plumes`,
 `explain_plume` and `quantify_plume` answer "is anything leaking here, what is it, and how
 much?". Enhancements are in ppm·m, rates in kg/h with a 1-sigma uncertainty that is usually
 dominated by the wind. Confidence is a calibrated probability that the plume is real and its
@@ -50,7 +51,8 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
             for sid, info in ws.scenes().items()
         }
         gas = {
-            sid: {"analyzed": (ws.gas_dir(sid) / "plumes.csv").exists()} for sid in ws.gas_scenes()
+            sid: {"sensor": src.sensor, "analyzed": (ws.gas_dir(sid) / "plumes.csv").exists()}
+            for sid, src in ws.gas_sources().items()
         }
         return {
             "sensors": ws.sensors(),
@@ -187,7 +189,8 @@ def build_server(ws: Workspace | None = None) -> FastMCP:
 
     @mcp.tool
     def detect_plumes(scene_id: str, rerun: bool = False) -> dict:
-        """Find, identify and quantify CH4 and CO2 plumes in an EMIT L1B scene.
+        """Find, identify and quantify CH4 and CO2 plumes in an EMIT L1B scene or an AVIRIS-NG
+        line, or find and identify LWIR gas plumes in a HyTES flight (no rates).
 
         Runs in the background (about a minute plus wind lookups); poll `job_status`, then use
         `list_plumes`. If the scene was already analyzed and `rerun` is false, returns its

@@ -48,6 +48,7 @@ class Layer:
     legend: list[dict] = field(default_factory=list)  # categorical: [{code, label, rgb}]
     build: Callable[[], Path] | None = field(default=None, repr=False)  # makes path if missing
     note: str = ""
+    compare_with: str | None = None  # name of a reference layer of the same quantity
 
     def public(self) -> dict:
         d = asdict(self)
@@ -74,7 +75,7 @@ class SceneEntry:
     title: str
     bounds: tuple[float, float, float, float] | None  # west, south, east, north (degrees)
     mineral_scene: str | None  # Workspace.scenes() id, for pixel identification
-    gas_scene: str | None  # Workspace.gas_scenes() id
+    gas_scene: str | None  # Workspace.gas_sources() id
     gas_dir: Path | None
 
 
@@ -120,13 +121,14 @@ def scene_entries(ws) -> list[SceneEntry]:
     for sid, info in ws.scenes().items():
         key = scene_key(sid)
         out[key] = SceneEntry(key, info.kind.upper(), sid, None, sid, None, None)
-    for gid in ws.gas_scenes():
-        e = out.setdefault(gid, SceneEntry(gid, "EMIT", gid, None, None, None, None))
+    for gid, src in ws.gas_sources().items():
+        e = out.setdefault(gid, SceneEntry(gid, src.sensor, gid, None, None, None, None))
+        e.sensor = src.sensor
         e.gas_scene, e.gas_dir = gid, ws.gas_dir(gid)
     ang = ws.root / "data/scenes/avirisng"
-    for d in sorted(ang.iterdir()) if ang.is_dir() else []:
+    for d in sorted(ang.iterdir()) if ang.is_dir() else []:  # published maps without radiance
         e = out.setdefault(d.name, SceneEntry(d.name, "AVIRIS-NG", d.name, None, None, None, None))
-        e.gas_dir = ws.gas_dir(d.name)
+        e.gas_dir = e.gas_dir or ws.gas_dir(d.name)
     for e in out.values():
         e.bounds = _entry_bounds(ws, e)
     return sorted(out.values(), key=lambda e: e.key)
@@ -143,7 +145,7 @@ def _entry_bounds(ws, e: SceneEntry):
         path = ws.scenes()[e.mineral_scene].path
         if path.suffix == ".nc":
             return _nc_bounds(path)
-    if e.gas_scene:
+    if e.gas_scene in ws.gas_scenes():
         return _nc_bounds(ws.gas_scenes()[e.gas_scene])
     ref = next((ws.root / "data/scenes/avirisng" / e.key).glob("*_cmf_pub_ch4.tif"), None)
     return _bounds_of(ref) if ref else None
@@ -154,7 +156,14 @@ def _entry_bounds(ws, e: SceneEntry):
 GAS_STYLE = {
     "CH4": ("magma", (0.0, 1500.0)),
     "CO2": ("magma", (0.0, 60000.0)),
+    # HyTES (LWIR): about 3x the 99th percentile of a background (Salton Sea, 2014-07-06)
+    "N2O": ("magma", (0.0, 750.0)),
+    "NH3": ("magma", (0.0, 60.0)),
+    "SO2": ("magma", (0.0, 1500.0)),
+    "C2H6": ("magma", (0.0, 1000.0)),
+    "C2H4": ("magma", (0.0, 90.0)),
 }
+LOW_CONTRAST_LEGEND = [{"code": 1, "label": "|ΔT| < 1 K: cannot detect", "rgb": [150, 150, 150]}]
 
 
 def _groups_legend(csv: Path) -> list[dict]:
@@ -227,6 +236,7 @@ def scene_layers(ws, e: SceneEntry) -> list[Layer]:
                 rescale=(0.0, 0.3),
             )
 
+    refs = _reference_layers(ws, key)
     if e.gas_dir and e.gas_dir.is_dir():
         for gas, (cmap, rng) in GAS_STYLE.items():
             p = e.gas_dir / f"{gas.lower()}_enh.tif"
@@ -240,7 +250,30 @@ def scene_layers(ws, e: SceneEntry) -> list[Layer]:
                     units="ppm·m",
                     colormap=cmap,
                     rescale=rng,
+                    compare_with=next((r[0] for r in refs if r[4] == gas), None),
                 )
+        if (e.gas_dir / "delta_t.tif").exists():
+            add(
+                "delta_t",
+                "Thermal contrast ΔT (plume − surface)",
+                "Gas",
+                "continuous",
+                e.gas_dir / "delta_t.tif",
+                units="K",
+                colormap="rdbu_r",
+                rescale=(-10.0, 10.0),
+                note="A plume is visible in the LWIR only where it is warmer or cooler than the "
+                "ground beneath it",
+            )
+        if (e.gas_dir / "low_contrast.tif").exists():
+            add(
+                "low_contrast",
+                "Cannot detect (low thermal contrast)",
+                "Gas",
+                "categorical",
+                e.gas_dir / "low_contrast.tif",
+                legend=LOW_CONTRAST_LEGEND,
+            )
         if (e.gas_dir / "confidence.tif").exists():
             add(
                 "plume_confidence",
@@ -283,28 +316,16 @@ def scene_layers(ws, e: SceneEntry) -> list[Layer]:
             note=note,
         )
 
-    for gas, (cmap, rng) in GAS_STYLE.items():
-        for p in _emit_ghg(ws, key, gas):
-            add(
-                f"emit_{gas.lower()}enh",
-                f"EMIT L2B {gas}ENH",
-                "Reference",
-                "continuous",
-                p,
-                units="ppm·m",
-                colormap=cmap,
-                rescale=rng,
-            )
-    for p in (ws.root / "data/scenes/avirisng" / key).glob("*_cmf_pub_ch4.tif"):
+    for name, title, p, rng, _gas in refs:
         add(
-            "published_ch4",
-            "Published CH4 (Duren et al. 2019)",
+            name,
+            title,
             "Reference",
             "continuous",
             p,
             units="ppm·m",
             colormap="magma",
-            rescale=(0.0, 1500.0),
+            rescale=rng,
         )
     l2bmin = _l2bmin_source(ws, key)
     if l2bmin is not None:
@@ -334,6 +355,19 @@ def scene_layers(ws, e: SceneEntry) -> list[Layer]:
                 f"depth is at least {DEPTH_MIN}",
             )
     return layers
+
+
+def _reference_layers(ws, key: str) -> list[tuple[str, str, Path, tuple[float, float], str]]:
+    """Published maps of the same quantity as ours: (name, title, path, stretch, gas)."""
+    out = []
+    for gas in ("CH4", "CO2"):
+        for p in _emit_ghg(ws, key, gas):
+            out.append((f"emit_{gas.lower()}enh", f"EMIT L2B {gas}ENH", p, GAS_STYLE[gas][1], gas))
+    for p in (ws.root / "data/scenes/avirisng" / key).glob("*_cmf_pub_ch4.tif"):
+        out.append(
+            ("published_ch4", "Published CH4 (Duren et al. 2019)", p, GAS_STYLE["CH4"][1], "CH4")
+        )
+    return out
 
 
 def _emit_ghg(ws, key: str, gas: str) -> list[Path]:

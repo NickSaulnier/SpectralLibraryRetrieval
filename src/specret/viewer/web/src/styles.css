@@ -147,3 +147,17 @@ h3 { font-size: 13px; margin: 14px 0 4px; }
 .bar-row .bar.rate .point { position: absolute; top: -3px; width: 3px; height: 14px; margin-left: -1px; background: var(--accent); border-radius: 1px; }
 .budget { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 4px 0; background: var(--line); }
 .budget i { display: block; height: 100%; }
+
+/* Phase V4: plume table, compare, persistence */
+.filters { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 6px 0; font-size: 12px; }
+.filters select { font-size: 12px; }
+.table-scroll { overflow-x: auto; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.badge { display: inline-block; min-width: 26px; padding: 0 5px; border-radius: 8px; font-size: 11px; text-align: center; background: var(--line); color: var(--muted); }
+.badge.on { background: var(--good); color: #fff; }
+.timeline ol { list-style: none; margin: 4px 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.timeline li { display: inline-flex; align-items: center; gap: 4px; }
+.timeline li i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-block; }
+.timeline li.seen i { background: var(--good); border-color: var(--good); }
+.timeline li.this i { background: var(--accent); border-color: var(--accent); }
+.compare-stats { margin-top: 6px; }

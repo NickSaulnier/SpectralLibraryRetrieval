@@ -41,8 +41,29 @@ def _summary_row(r: pd.Series) -> dict:
         "wind_source",
         "confusers_fitted",
         "carbonate_fraction",
+        "q_csf_kg_h",
+        "detection_gas",
     )
     return {k: r.get(k) for k in keys if k in r}
+
+
+def persistence_table(out_root: Path) -> dict[tuple[str, int], dict]:
+    """(scene, plume id) -> repeat counts from `specret gas-persistence`
+    (outputs/gas/persistence.csv), or {} if it has not been run."""
+    path = out_root / "persistence.csv"
+    if not path.exists():
+        return {}
+    df = pd.read_csv(path, dtype={"seen_in": str, "covered_by": str})
+    out = {}
+    for _, r in df.iterrows():
+        split = lambda v: [x for x in str(v).split(";") if x and x != "nan"]  # noqa: E731
+        out[(str(r["scene"]), int(r["plume_id"]))] = {
+            "overpasses_covering": int(r["overpasses_covering"]),
+            "overpasses_seen": int(r["overpasses_seen"]),
+            "seen_in": split(r.get("seen_in")),
+            "covered_by": split(r.get("covered_by")),
+        }
+    return out
 
 
 def scene_gas_summary(folder: Path) -> dict:
@@ -78,11 +99,15 @@ def list_plumes(folder: Path, gas: str | None = None, min_q: float | None = None
     )
 
 
-def fit_spectra(folder: Path, detection_gas: str, candidate_id: int) -> dict | None:
+def fit_spectra(
+    folder: Path, detection_gas: str, candidate_id: int, segment: int | None = None
+) -> dict | None:
     """A candidate's stored fit (gas/outputs.write_spectra) in log-radiance units, or None
     for scenes detected before the spectra were stored."""
+    from specret.gas.outputs import spectra_key
+
     path = folder / "plume_spectra.npz"
-    key = f"{detection_gas}_{int(candidate_id)}/"
+    key = spectra_key(detection_gas, candidate_id, segment) + "/"
     if not path.exists():
         return None
     with np.load(path) as z:
@@ -114,9 +139,12 @@ def explain_plume(folder: Path, plume_id: int, spectra: bool = True) -> dict:
         raise ValueError(f"no plume {plume_id} in {folder.name}")
     r = row.iloc[0]
     cand = pd.read_csv(folder / "candidates.csv")
-    c = cand[
-        (cand["candidate_id"] == r["candidate_id"]) & (cand["detection_gas"] == r["detection_gas"])
-    ].iloc[0]
+    same = (cand["candidate_id"] == r["candidate_id"]) & (
+        cand["detection_gas"] == r["detection_gas"]
+    )
+    if "segment" in cand and "segment" in r:  # HyTES: ids restart in each segment
+        same &= cand["segment"] == r["segment"]
+    c = cand[same].iloc[0]
     features = ("mf_z", "gas_z", "coherence", "vs_confusers", "consistency", "log_px")
     terms = dict(t.split("=") for t in str(r["terms"]).split(";") if "=" in t)
     return jsonable(
@@ -156,7 +184,12 @@ def explain_plume(folder: Path, plume_id: int, spectra: bool = True) -> dict:
             },
             "source": {k: r.get(k) for k in ("source_lat", "source_lon")},
             "wind": {k: r.get(k) for k in ("wind_u", "wind_v") if k in r},
-            "spectra": fit_spectra(folder, r["detection_gas"], r["candidate_id"])
+            "spectra": fit_spectra(
+                folder,
+                r["detection_gas"],
+                r["candidate_id"],
+                r["segment"] if "segment" in r and pd.notna(r["segment"]) else None,
+            )
             if spectra
             else None,
         }

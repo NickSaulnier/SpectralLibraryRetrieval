@@ -112,6 +112,15 @@ export interface GasScene {
 
 export interface PlumeRow {
   plume_id: number;
+  scene_id?: string; // in the all-scenes list
+  sensor?: string; // EMIT, AVIRIS-NG or HyTES
+  detection_gas?: string;
+  q_csf_kg_h?: number | null;
+  // From `specret gas-persistence` (EMIT): other overpasses over the source, and those that saw it
+  overpasses_covering?: number;
+  overpasses_seen?: number;
+  covered_by?: string[];
+  seen_in?: string[];
   gas: string;
   confidence: number;
   source_lat: number | null;
@@ -184,4 +193,27 @@ export interface PlumeSpectra {
   model: number[];
   remainder: number[];
   signatures_per_ppmm: Record<string, number[]>;
+}
+
+/** Our enhancement against a published map over the visible area (/api/geo/{key}/compare). */
+export interface FitStats {
+  n: number;
+  r?: number;
+  slope?: number;
+  intercept?: number;
+  mean_diff?: number;
+  deming_slope?: number;
+}
+
+export interface Comparison {
+  ours: string;
+  ref: string;
+  units: string;
+  recipe: string;
+  view_pixels: number;
+  plume_pixels: FitStats;
+  scene_pixels: FitStats;
+  background_sigma_ours: number;
+  background_sigma_ref: number;
+  sample: { plume: { ref: number[]; ours: number[] }; background: { ref: number[]; ours: number[] } };
 }

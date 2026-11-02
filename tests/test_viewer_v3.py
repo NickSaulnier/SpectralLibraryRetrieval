@@ -32,13 +32,12 @@ def test_fit_spectra_add_up_to_the_observed_residual():
 def test_spectra_round_trip_through_explain_plume(tmp_path):
     from specret.gas import tools
     from specret.gas.outputs import write_spectra
-    from specret.gas.pipeline import CandidateRecord
 
     ctx, cand = synthetic_context("CH4")
     res = identify(ctx, cand, "CH4", n_null=200)
     folder = tmp_path / "20230608T162322_2315911_014"
     folder.mkdir()
-    write_spectra(folder / "plume_spectra.npz", [CandidateRecord("CH4", cand, res, None)])
+    write_spectra(folder / "plume_spectra.npz", [(f"CH4_{cand.id}", res.spectra)])
     pd.DataFrame(
         {
             "plume_id": [1],

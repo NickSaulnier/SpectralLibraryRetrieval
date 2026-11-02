@@ -7,6 +7,10 @@ Both maps are on the scene's GLT grid. Agreement is measured where both have dat
   regression uses the ratio of the two background variances and is the slope to judge by;
 * background (everything outside the plumes, dilated by a few pixels): robust spread of each
   map and the correlation over the whole scene.
+
+`compare_arrays` does the same for any two maps on one grid; the viewer's compare view uses
+it on the visible part of a scene, with `published_plume_mask` for maps (AVIRIS-NG, G5)
+that come without plume outlines.
 """
 
 from __future__ import annotations
@@ -52,6 +56,42 @@ def robust_sigma(v: np.ndarray) -> float:
     return float(ROBUST * np.median(np.abs(v - np.median(v)))) if v.size else float("nan")
 
 
+def published_plume_mask(ref: np.ndarray, z: float = 4.0, min_px: int = 30) -> np.ndarray:
+    """Plume pixels of a published map with no plume product of its own (AVIRIS-NG, G5): the
+    map smoothed (sigma 2 px) above `z` robust sigmas, in regions of at least `min_px`."""
+    from specret.gas.plumes import smooth_nan
+
+    sm = smooth_nan(ref.astype(np.float64), 2.0)
+    zs = sm / robust_sigma(sm[np.isfinite(sm)])
+    lab, n = ndimage.label(np.nan_to_num(zs) > z)
+    if n == 0:
+        return np.zeros(ref.shape, dtype=bool)
+    sizes = ndimage.sum(np.ones_like(zs), lab, range(1, n + 1))
+    return np.isin(lab, np.flatnonzero(sizes >= min_px) + 1)
+
+
+def compare_arrays(
+    ours: np.ndarray, ref: np.ndarray, plume: np.ndarray, background: np.ndarray | None = None
+) -> dict:
+    """Agreement of two maps on one grid. `background` selects the pixels whose robust spread
+    sets the Deming noise ratio (default: every pixel with both values)."""
+    x, y = ref, ours
+    both = np.isfinite(x) & np.isfinite(y)
+    b = both if background is None else both & background
+    sig_ours, sig_ref = robust_sigma(y[b]), robust_sigma(x[b])
+    p = both & plume
+    return {
+        "plume_pixels": _fit(x[p], y[p], (sig_ours / sig_ref) ** 2),
+        "scene_pixels": _fit(x[both], y[both]),
+        "background_sigma_ours": sig_ours,
+        "background_sigma_ref": sig_ref,
+        "background_median_ours": float(np.median(y[b])) if b.any() else float("nan"),
+        "background_median_ref": float(np.median(x[b])) if b.any() else float("nan"),
+        "valid_pixels_ours": int(np.isfinite(y).sum()),
+        "valid_pixels_ref": int(np.isfinite(x).sum()),
+    }
+
+
 def compare(ours_path: Path, scene_folder: Path, scene: str, gas: str = "CH4") -> dict:
     ref_path = enhancement_path(scene_folder, scene, gas)
     if ref_path is None:
@@ -59,21 +99,12 @@ def compare(ours_path: Path, scene_folder: Path, scene: str, gas: str = "CH4") -
     ours, ref = read_raster(ours_path), read_raster(ref_path)
     if ours.data.shape != ref.data.shape:
         raise ValueError(f"grids differ: ours {ours.data.shape}, EMIT {ref.data.shape}")
-    both = np.isfinite(ours.data) & np.isfinite(ref.data)
     plume = plume_mask(scene_folder, scene, ref, gas)
     near = ndimage.binary_dilation(plume, iterations=PLUME_MARGIN_PX)
-    x, y = ref.data, ours.data
-    p, b = both & plume, both & ~near
-    sig_ours, sig_emit = robust_sigma(y[b]), robust_sigma(x[b])
+    out = compare_arrays(ours.data, ref.data, plume, ~near)
+    # Keep the G1 field names
     return {
         "scene": scene,
         "gas": gas,
-        "plume_pixels": _fit(x[p], y[p], (sig_ours / sig_emit) ** 2),
-        "scene_pixels": _fit(x[both], y[both]),
-        "background_sigma_ours": sig_ours,
-        "background_sigma_emit": sig_emit,
-        "background_median_ours": float(np.median(y[b])),
-        "background_median_emit": float(np.median(x[b])),
-        "valid_pixels_ours": int(np.isfinite(y).sum()),
-        "valid_pixels_emit": int(np.isfinite(x).sum()),
+        **{k.replace("_ref", "_emit"): v for k, v in out.items()},
     }

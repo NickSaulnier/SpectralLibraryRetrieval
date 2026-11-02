@@ -2,7 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../api/client";
 import { pretty } from "../lib";
+import { CompareStats } from "../panels/CompareStats";
 import type { LayerState } from "./layerState";
+import type { Bounds } from "./MapView";
 
 const COLORMAPS = ["viridis", "magma", "inferno", "cividis", "rdylgn", "rdbu_r", "greys_r", "turbo"];
 
@@ -16,11 +18,15 @@ interface Props {
   showPlumes: boolean;
   hasPlumes: boolean;
   onShowPlumes: (v: boolean) => void;
+  view: Bounds | null;
+  gasCompare: string | null; // our layer being compared with its published counterpart
+  onGasCompare: (id: string | null) => void;
 }
 
 /** Layer list, top of the drawing order first, grouped by kind. */
 export function LayerPanel(props: Props) {
   const { layers, onChange, onMove, showPlumes, hasPlumes, onShowPlumes, compareId, onCompare } = props;
+  const titleOf = (name: string) => layers.find((x) => x.name === name)?.title ?? name;
   const ramps = useQuery({ queryKey: ["colormaps"], queryFn: api.colormaps, staleTime: Infinity });
   const topFirst = layers.slice().reverse();
   if (!layers.length) return <p className="hint">This scene has no layers yet: map it or detect plumes.</p>;
@@ -113,6 +119,18 @@ export function LayerPanel(props: Props) {
               )}
               {l.kind === "categorical" && <Categories layer={l} onChange={onChange} />}
               {l.name === "agreement" && l.ready && props.sceneKey && <AgreementStats sceneKey={props.sceneKey} />}
+              {l.compare_with && (
+                <button
+                  type="button"
+                  className={props.gasCompare === l.id ? "primary" : ""}
+                  onClick={() => props.onGasCompare(props.gasCompare === l.id ? null : l.id)}
+                >
+                  {props.gasCompare === l.id ? "Stop comparing" : `Compare with ${titleOf(l.compare_with)}`}
+                </button>
+              )}
+              {props.gasCompare === l.id && props.sceneKey && (
+                <CompareStats sceneKey={props.sceneKey} layer={l.name} view={props.view} />
+              )}
             </div>
           )}
         </div>
@@ -182,7 +200,7 @@ function Categories({ layer: l, onChange }: { layer: LayerState; onChange: Props
           >
             <i style={{ background: `rgb(${e.rgb.join(",")})` }} />
             {pretty(e.label)}
-            {e.fraction != null && <span className="frac">{(100 * e.fraction).toFixed(e.fraction < 0.01 ? 1 : 0)}%</span>}
+            {e.fraction != null && present.length > 1 && <span className="frac">{(100 * e.fraction).toFixed(e.fraction < 0.01 ? 1 : 0)}%</span>}
           </button>
         ))}
       </div>

@@ -203,6 +203,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/gas/plumes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All Plumes
+         * @description Every plume of every analyzed scene, line and flight, with its sensor and, for EMIT,
+         *     how many other overpasses saw it again (`specret gas-persistence`).
+         */
+        get: operations["all_plumes_api_gas_plumes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/gas/{scene_id}": {
         parameters: {
             query?: never;
@@ -439,6 +460,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/geo/{key}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geo Compare
+         * @description Our enhancement layer against its published counterpart (the layer's compare_with)
+         *     inside bbox "west,south,east,north" (default: the whole scene): r, OLS and Deming
+         *     slopes on plume and scene pixels, background spreads, and a sample for a scatter.
+         */
+        get: operations["geo_compare_api_geo__key__compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/colormaps": {
         parameters: {
             query?: never;
@@ -552,6 +595,8 @@ export interface components {
             buildable: boolean;
             /** Note */
             note: string;
+            /** Compare With */
+            compare_with?: string | null;
         };
         /** LayerStats */
         LayerStats: {
@@ -946,6 +991,28 @@ export interface operations {
             };
         };
     };
+    all_plumes_api_gas_plumes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
     start_gas_api_gas__scene_id__post: {
         parameters: {
             query?: never;
@@ -1312,6 +1379,42 @@ export interface operations {
     geo_agreement_api_geo__key__agreement_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geo_compare_api_geo__key__compare_get: {
+        parameters: {
+            query: {
+                layer: string;
+                bbox?: string | null;
+            };
             header?: never;
             path: {
                 key: string;

@@ -258,11 +258,11 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
             out.append({"name": spec.name, **spectrum_payload(sensor, query, res)})
         return out
 
-    # --- gas plumes (EMIT L1B radiance scenes) ---------------------------------------
+    # --- gas plumes (EMIT and AVIRIS-NG radiance, HyTES flights) ----------------------
 
     def gas_folder(scene_id: str) -> Path:
-        if scene_id not in ws.gas_scenes():
-            raise HTTPException(404, f"no EMIT L1B radiance for {scene_id}")
+        if scene_id not in ws.gas_sources():
+            raise HTTPException(404, f"no radiance for {scene_id}")
         return ws.gas_dir(scene_id)
 
     @app.get("/api/gas/scenes")
@@ -270,11 +270,35 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
         return [
             {
                 "scene_id": sid,
+                "sensor": src.sensor,
                 "analyzed": (ws.gas_dir(sid) / "plumes.csv").exists(),
                 "job": jobs.running_job(sid, "gas"),
             }
-            for sid in ws.gas_scenes()
+            for sid, src in ws.gas_sources().items()
         ]
+
+    @app.get("/api/gas/plumes")
+    def all_plumes() -> list[dict]:
+        """Every plume of every analyzed scene, line and flight, with its sensor and, for EMIT,
+        how many other overpasses saw it again (`specret gas-persistence`)."""
+        from specret.gas import tools
+
+        rep = tools.persistence_table(ws.root / "outputs/gas")
+        out = []
+        for sid, src in ws.gas_sources().items():
+            folder = ws.gas_dir(sid)
+            if not (folder / "plumes.csv").exists():
+                continue
+            for row in tools.list_plumes(folder)["plumes"]:
+                out.append(
+                    {
+                        "scene_id": sid,
+                        "sensor": src.sensor,
+                        **row,
+                        **rep.get((sid, row["plume_id"]), {}),
+                    }
+                )
+        return out
 
     @app.post("/api/gas/{scene_id}")
     def start_gas(scene_id: str) -> dict:
@@ -328,13 +352,17 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
             summary = tools.scene_gas_summary(folder)
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
-        path = ws.gas_scenes()[scene_id]
-        import xarray as xr
+        rep = tools.persistence_table(ws.root / "outputs/gas")
+        path = ws.gas_scenes().get(scene_id)  # EMIT: ortho-image pixel of each source
+        if path is not None:
+            import xarray as xr
 
-        with xr.open_dataset(path) as ds:
-            x0, dx, _, y0, _, dy = np.asarray(ds.attrs["geotransform"], dtype=float)
+            with xr.open_dataset(path) as ds:
+                x0, dx, _, y0, _, dy = np.asarray(ds.attrs["geotransform"], dtype=float)
         for pl in out["plumes"]:
-            if pl.get("source_lat") is not None:
+            pl["sensor"] = ws.gas_sources()[scene_id].sensor
+            pl.update(rep.get((scene_id, pl["plume_id"]), {}))
+            if path is not None and pl.get("source_lat") is not None:
                 pl["x"] = int(np.floor((pl["source_lon"] - x0) / dx))
                 pl["y"] = int(np.floor((pl["source_lat"] - y0) / dy))
         out["summary"] = summary
@@ -518,6 +546,37 @@ def create_app(ws: Workspace | None = None) -> FastAPI:
             layer.build()
         return json.loads(layer.path.with_suffix(".json").read_text(encoding="utf-8"))
 
+    @app.get("/api/geo/{key}/compare")
+    def geo_compare(key: str, layer: str, bbox: str | None = None) -> dict:
+        """Our enhancement layer against its published counterpart (the layer's compare_with)
+        inside bbox "west,south,east,north" (default: the whole scene): r, OLS and Deming
+        slopes on plume and scene pixels, background spreads, and a sample for a scatter."""
+        from specret.viewer import compare
+
+        e = entry(key)
+        ls = {x.name: x for x in layers_mod.scene_layers(ws, e)}
+        ours = ls.get(layer)
+        if ours is None or ours.compare_with is None:
+            raise HTTPException(404, f"{layer} has no published counterpart in {key}")
+        ref = ls[ours.compare_with]
+        box = None
+        if bbox:
+            try:
+                box = tuple(float(v) for v in bbox.split(","))
+                assert len(box) == 4
+            except (ValueError, AssertionError):
+                raise HTTPException(400, "bbox is west,south,east,north") from None
+        gas = layer.removesuffix("_enh").upper()
+        pair = compare.load_pair(ours.path, ref.path, ref.name, key, gas)
+        return jsonable(
+            {
+                "ours": ours.title,
+                "ref": ref.title,
+                "units": ours.units,
+                **compare.compare_view(pair, box),
+            }
+        )
+
     @app.get("/api/colormaps")
     def colormaps() -> dict[str, list[str]]:
         """Each colormap sampled at 11 stops, as hex colours, for legends."""
@@ -614,6 +673,7 @@ class LayerInfo(BaseModel):
     ready: bool
     buildable: bool
     note: str
+    compare_with: str | None = None
 
 
 @lru_cache(maxsize=1)

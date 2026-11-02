@@ -332,6 +332,17 @@ def inject_lwir(
     return Injection(out.astype(np.float32), alpha, list(plumes), labels)
 
 
+@dataclass
+class FlightMaps:
+    """Per-pixel results of a flight, in flight geometry (lines, samples)."""
+
+    alpha: dict[str, np.ndarray]  # gas -> ppm·m, float32, NaN where masked
+    delta_t: np.ndarray  # T_plume - BT(surface), K
+    low_contrast: np.ndarray  # bool: |delta_t| too small to detect anything
+    candidates: np.ndarray  # int32: row index + 1 in the candidates table, 0 = none
+    spectra: list = field(default_factory=list)  # (spectra key, identify.FitSpectra)
+
+
 def analyze_flight(
     flight: HytesFlight,
     t_plume: float | None = None,
@@ -339,14 +350,22 @@ def analyze_flight(
     log=print,
 ):
     """Every segment of a flight: (candidates DataFrame with flight rows and lat/lon,
-    {gas: alpha (lines, samples) float32})."""
+    FlightMaps)."""
     import pandas as pd
+
+    from specret.gas.outputs import spectra_key
 
     seg = plume_config()["lwir"]["segment_rows"]
     lines = flight.shape[0]
     start, stop = (0, lines) if rows is None else (rows.start or 0, rows.stop or lines)
     geo = flight.geolocation()
-    frames, maps = [], {}
+    maps = FlightMaps(
+        {},
+        np.full(flight.shape, np.nan, dtype=np.float32),
+        np.zeros(flight.shape, dtype=bool),
+        np.zeros(flight.shape, dtype=np.int32),
+    )
+    frames, n = [], 0
     for r0 in range(start, stop, seg):
         r1 = min(r0 + seg, stop)
         if r1 - r0 < 200:  # too few lines for column statistics: fold into the last segment
@@ -354,7 +373,18 @@ def analyze_flight(
         prep = prepare_lwir(flight, slice(r0, r1), t_plume)
         enh, recs = analyze_lwir(prep)
         for g, e in enh.items():
-            maps.setdefault(g, np.full(flight.shape, np.nan, dtype=np.float32))[r0:r1] = e.alpha
+            maps.alpha.setdefault(g, np.full(flight.shape, np.nan, dtype=np.float32))[r0:r1] = (
+                e.alpha
+            )
+        first = next(iter(enh.values()))
+        maps.delta_t[r0:r1] = first.delta_t
+        maps.low_contrast[r0:r1] = first.low_contrast
+        for i, rec in enumerate(recs):
+            c = rec.candidate
+            lab = maps.candidates[c.rows + r0, c.cols]
+            maps.candidates[c.rows + r0, c.cols] = np.where(lab == 0, n + i + 1, lab)
+            maps.spectra.append((spectra_key(rec.detection_gas, c.id, r0), rec.ident.spectra))
+        n += len(recs)
         df = pd.DataFrame([r.row() for r in recs])
         if len(df):
             df["row"] += r0
@@ -370,23 +400,32 @@ def analyze_flight(
 
 
 HYTES_MODEL = "configs/calibration/gas_hytes.json"
+LOW_CONTRAST_CODE = 1
 
 
-def write_flight(flight: HytesFlight, df, maps: dict, out_dir="outputs/gas/hytes") -> Path:
-    """candidates.csv, plumes.csv and plumes.geojson (source points), and the enhancement maps
-    (enhancement.npz, ppm·m per gas in flight geometry) for one flight."""
+def write_flight(flight: HytesFlight, df, maps: FlightMaps, out_dir="outputs/gas/hytes") -> Path:
+    """One flight's results in outputs/gas/hytes/<flight>/:
+    * candidates.csv, plumes.csv, plume_spectra.npz (each candidate's fit)
+    * enhancement.npz: ppm·m per gas in flight geometry
+    With geolocation, also on a lat/lon grid (gas/grid.py), like an EMIT scene:
+    * <gas>_enh.tif, delta_t.tif (K), low_contrast.tif (1 = cannot detect, else nodata),
+      plume_mask.tif
+    * plumes.geojson: plume outlines as polygons, with the plumes.csv fields
+    """
     import json
 
     import pandas as pd
 
+    from specret.gas.outputs import write_spectra
     from specret.openset.calibrate import ConfidenceModel
     from specret.workspace import jsonable
 
     folder = Path(out_dir) / flight.name
     folder.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
-        folder / "enhancement.npz", **{g: a.astype(np.float16) for g, a in maps.items()}
+        folder / "enhancement.npz", **{g: a.astype(np.float16) for g, a in maps.alpha.items()}
     )
+    write_spectra(folder / "plume_spectra.npz", maps.spectra)
     df.to_csv(folder / "candidates.csv", index=False)
     model_path = Path(HYTES_MODEL)
     thr = plume_config()["identify"]["confidence_threshold"]
@@ -397,25 +436,80 @@ def write_flight(flight: HytesFlight, df, maps: dict, out_dir="outputs/gas/hytes
             if model_path.exists()
             else np.full(len(df), np.nan)
         )
-        df = df.assign(confidence=p)
+        df = df.assign(confidence=p, candidate_row=np.arange(len(df)))
         keep = df["gas"].notna() & ((df["confidence"] >= thr) | df["confidence"].isna())
         plumes = (
             df[keep].sort_values(["confidence", "gas_z"], ascending=False).reset_index(drop=True)
         )
         plumes.insert(0, "plume_id", np.arange(1, len(plumes) + 1))
-    plumes.to_csv(folder / "plumes.csv", index=False)
+        if "lat" in plumes:
+            plumes["source_lat"], plumes["source_lon"] = plumes["lat"], plumes["lon"]
+    plumes.drop(columns=["candidate_row"], errors="ignore").to_csv(
+        folder / "plumes.csv", index=False
+    )
     feats = []
-    if "lat" in plumes:
-        for _, r in plumes.iterrows():
-            feats.append(
-                {
-                    "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [r["lon"], r["lat"]]},
-                    "properties": jsonable(r.to_dict()),
-                }
-            )
+    geo = flight.geolocation()
+    if geo is not None:
+        feats = _write_grids(folder, geo, maps, plumes)
     (folder / "plumes.geojson").write_text(
-        json.dumps({"type": "FeatureCollection", "flight": flight.name, "features": feats}),
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "flight": flight.name,
+                "features": [{**f, "properties": jsonable(f["properties"])} for f in feats],
+            }
+        ),
         encoding="utf-8",
     )
     return folder
+
+
+def _write_grids(folder: Path, geo, maps: FlightMaps, plumes) -> list[dict]:
+    """The flight's maps on a lat/lon grid, and plume outline features."""
+    from rasterio import features
+    from rasterio.crs import CRS
+
+    from specret.gas.grid import swath_grid
+    from specret.scene.outputs import _write
+
+    nodata = -9999.0
+    grid = swath_grid(*geo)
+    crs = CRS.from_epsg(4326).to_wkt()
+    for g, a in maps.alpha.items():
+        _write(
+            folder / f"{g.lower()}_enh.tif",
+            np.nan_to_num(grid.take(a), nan=nodata),
+            grid.transform,
+            crs,
+            nodata,
+        )
+    _write(
+        folder / "delta_t.tif",
+        np.nan_to_num(grid.take(maps.delta_t), nan=nodata),
+        grid.transform,
+        crs,
+        nodata,
+    )
+    low = grid.take(maps.low_contrast.astype(np.uint8), fill=0).astype(np.uint8)
+    _write(
+        folder / "low_contrast.tif",
+        low,
+        grid.transform,
+        crs,
+        0,
+        colormap={LOW_CONTRAST_CODE: (150, 150, 150, 255)},
+    )
+
+    # Plume ids on the grid: candidate label -> the plume made from that candidate
+    to_plume = np.zeros(int(maps.candidates.max()) + 1, dtype=np.int32)
+    if len(plumes):
+        to_plume[plumes["candidate_row"].to_numpy() + 1] = plumes["plume_id"].to_numpy()
+    lab = grid.take(to_plume[maps.candidates], fill=0).astype(np.int32)
+    _write(folder / "plume_mask.tif", lab, grid.transform, crs, 0)
+    by_id = {
+        int(r["plume_id"]): r.drop(labels=["candidate_row"]).to_dict() for _, r in plumes.iterrows()
+    }
+    return [
+        {"type": "Feature", "geometry": geom, "properties": by_id[int(v)]}
+        for geom, v in features.shapes(lab, mask=lab > 0, transform=grid.transform)
+    ]

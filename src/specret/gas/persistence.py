@@ -65,7 +65,7 @@ def persistence(results: list[SceneResult], radius_m: float = 300.0) -> pd.DataF
         for _, p in a.plumes.iterrows():
             lat0, lon0 = p["source_lat"], p["source_lon"]
             covered = seen = 0
-            seen_in = []
+            seen_in, covered_by = [], []
             for b in results:
                 if b.scene_id == a.scene_id or b.scene_id[:15] == a.scene_id[:15]:
                     continue  # same overpass (adjacent scenes of one orbit) is not a repeat
@@ -73,6 +73,7 @@ def persistence(results: list[SceneResult], radius_m: float = 300.0) -> pd.DataF
                 if not len(x) or np.min(np.hypot(x, y)) > radius_m:
                     continue
                 covered += 1
+                covered_by.append(b.scene_id)
                 pts = [b.candidates.loc[b.candidates["gas"] == p["gas"], ["lat", "lon"]]]
                 if len(b.plumes):
                     bp = b.plumes[b.plumes["gas"] == p["gas"]]
@@ -96,6 +97,7 @@ def persistence(results: list[SceneResult], radius_m: float = 300.0) -> pd.DataF
                     "overpasses_seen": seen,
                     "persistence": seen / covered if covered else np.nan,
                     "seen_in": ";".join(seen_in),
+                    "covered_by": ";".join(covered_by),
                 }
             )
     return pd.DataFrame(rows)
